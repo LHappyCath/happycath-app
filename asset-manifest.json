@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/happycath-app/static/css/main.d5653584.css",
+    "main.js": "/happycath-app/static/js/main.ba267678.js",
+    "index.html": "/happycath-app/index.html",
+    "main.d5653584.css.map": "/happycath-app/static/css/main.d5653584.css.map",
+    "main.ba267678.js.map": "/happycath-app/static/js/main.ba267678.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.d5653584.css",
+    "static/js/main.ba267678.js"
+  ]
+}
