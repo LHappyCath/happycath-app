@@ -1,0 +1,15 @@
+{
+  "short_name": "HappyCath",
+  "name": "L'HappyCath Academy",
+  "description": "Gestion de la salle L'HappyCath Academy — Chavanod",
+  "start_url": "/happycath-app/",
+  "scope": "/happycath-app/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#1a1a1a",
+  "background_color": "#f5f5f5",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
