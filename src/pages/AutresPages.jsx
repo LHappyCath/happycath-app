@@ -53,11 +53,11 @@ export function Cours() {
 export function Reglements() {
   return (
     <div>
-      <div className="page-header"><h1 className="page-title">Règlements</h1><button className="btn btn-primary">+ Nouveau règlement</button></div>
-      <div className="card" style={{ textAlign: 'center', padding: 40 }}>
-        <p style={{ fontSize: 32, marginBottom: 12 }}>💶</p>
-        <p style={{ fontWeight: 500, marginBottom: 6 }}>Module règlements</p>
-        <p style={{ color: '#888', fontSize: 14 }}>Chèques, espèces, remises banque — en cours de développement</p>
+      <div className="page-header"><h1 className="page-title">Règlements</h1><button style={{ padding:'9px 18px', borderRadius:8, border:'none', background:'#FF0099', color:'#fff', cursor:'pointer', fontSize:14, fontWeight:500 }}>+ Nouveau règlement</button></div>
+      <div className="card" style={{ textAlign:'center', padding:40 }}>
+        <p style={{ fontSize:32, marginBottom:12 }}>💶</p>
+        <p style={{ fontWeight:500, marginBottom:6 }}>Module règlements</p>
+        <p style={{ color:'#888', fontSize:14 }}>Chèques, espèces, remises banque — en cours de développement</p>
       </div>
     </div>
   )
@@ -67,10 +67,10 @@ export function Budget() {
   return (
     <div>
       <div className="page-header"><h1 className="page-title">Budget & finances</h1></div>
-      <div className="card" style={{ textAlign: 'center', padding: 40 }}>
-        <p style={{ fontSize: 32, marginBottom: 12 }}>📊</p>
-        <p style={{ fontWeight: 500, marginBottom: 6 }}>Module budget</p>
-        <p style={{ color: '#888', fontSize: 14 }}>Prévisionnel, réel, trésorerie, impôt EI — en cours de développement</p>
+      <div className="card" style={{ textAlign:'center', padding:40 }}>
+        <p style={{ fontSize:32, marginBottom:12 }}>📊</p>
+        <p style={{ fontWeight:500, marginBottom:6 }}>Module budget</p>
+        <p style={{ color:'#888', fontSize:14 }}>Prévisionnel, réel, trésorerie, impôt EI — en cours de développement</p>
       </div>
     </div>
   )
@@ -79,11 +79,11 @@ export function Budget() {
 export function Factures() {
   return (
     <div>
-      <div className="page-header"><h1 className="page-title">Factures</h1><button className="btn btn-primary">+ Nouvelle facture</button></div>
-      <div className="card" style={{ textAlign: 'center', padding: 40 }}>
-        <p style={{ fontSize: 32, marginBottom: 12 }}>🧾</p>
-        <p style={{ fontWeight: 500, marginBottom: 6 }}>Module factures</p>
-        <p style={{ color: '#888', fontSize: 14 }}>Établir, envoyer, suivre — en cours de développement</p>
+      <div className="page-header"><h1 className="page-title">Factures</h1><button style={{ padding:'9px 18px', borderRadius:8, border:'none', background:'#FF0099', color:'#fff', cursor:'pointer', fontSize:14, fontWeight:500 }}>+ Nouvelle facture</button></div>
+      <div className="card" style={{ textAlign:'center', padding:40 }}>
+        <p style={{ fontSize:32, marginBottom:12 }}>🧾</p>
+        <p style={{ fontWeight:500, marginBottom:6 }}>Module factures</p>
+        <p style={{ color:'#888', fontSize:14 }}>Établir, envoyer, suivre — en cours de développement</p>
       </div>
     </div>
   )
