@@ -2,7 +2,8 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
 import Accueil from './pages/Accueil'
 import Membres from './pages/Membres'
-import { Cours, Reglements, Budget, Factures } from './pages/AutresPages'
+import Cours from './pages/Cours'
+import { Reglements, Budget, Factures } from './pages/AutresPages'
 import './index.css'
 
 export default function App() {
