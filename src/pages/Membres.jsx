@@ -125,22 +125,35 @@ function FicheMembre({ membre, tousLesCours, onClose, onEdit, onArchiver }) {
   }, [membre.id])
 
   async function loadStats() {
-    // Charger inscriptions du membre
-    const { data: inscData } = await supabase.from('inscriptions').select('cours_id').eq('membre_id', membre.id)
+    let inscData, histoData
+
+    if (!navigator.onLine) {
+      // Utiliser les caches locaux
+      try {
+        const inscCache = JSON.parse(localStorage.getItem('happycath_inscriptions_cache') || '[]')
+        inscData = inscCache.filter(i => i.membre_id === membre.id)
+        histoData = JSON.parse(localStorage.getItem('happycath_histo_cache') || '[]')
+      } catch(e) { inscData = []; histoData = [] }
+    } else {
+      // En ligne : charger depuis Supabase et mettre en cache
+      const [{ data: iData }, { data: hData }] = await Promise.all([
+        supabase.from('inscriptions').select('cours_id').eq('membre_id', membre.id),
+        supabase.from('historique').select('*').order('date', { ascending: false })
+      ])
+      inscData = iData || []
+      histoData = hData || []
+      // Mettre à jour le cache historique complet
+      try { localStorage.setItem('happycath_histo_cache', JSON.stringify(histoData)) } catch(e) {}
+    }
+
     const courIds = (inscData||[]).map(i=>i.cours_id)
-
-    // Charger tout l'historique des cours du membre
-    const { data: histoData } = await supabase.from('historique').select('*').order('date', { ascending:false })
-
     const toutesLesSessions = []
     let totalSuivis = 0, totalManques = 0, totalRattrapages = 0, derniereDate = null
 
-    // Analyser par cours inscrit
     const statsParCours = courIds.map(cId => {
       const cours = tousLesCours.find(c=>c.id===cId)
       const appels = (histoData||[]).filter(h=>h.cours_id===cId)
       let suivis=0, manques=0
-
       appels.forEach(h => {
         const estPresent = (h.presents||[]).includes(membre.id)
         const estRattrapage = (h.guests||[]).some(g=>g.membreId===membre.id&&g.type==='rattrapage')
@@ -148,12 +161,10 @@ function FicheMembre({ membre, tousLesCours, onClose, onEdit, onArchiver }) {
         if (estPresent||estRattrapage) { suivis++; if(!derniereDate||h.date>derniereDate) derniereDate=h.date }
         else manques++
       })
-
       totalSuivis+=suivis; totalManques+=manques
       return { cours, suivis, manques, total:appels.length, taux: appels.length>0?Math.round(suivis/appels.length*100):0 }
     })
 
-    // Rattrapages dans d'autres cours
     ;(histoData||[]).forEach(h => {
       const isRattrapage = (h.guests||[]).some(g=>g.membreId===membre.id&&g.type==='rattrapage')
       if (isRattrapage && !courIds.includes(h.cours_id)) {
@@ -311,6 +322,7 @@ export default function Membres() {
 
   useEffect(() => {
     loadData()
+    if (!navigator.onLine) return
     const sub = supabase.channel('membres_ch')
       .on('postgres_changes', { event:'*', schema:'public', table:'membres' }, loadData)
       .subscribe()
