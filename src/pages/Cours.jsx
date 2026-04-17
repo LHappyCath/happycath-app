@@ -469,10 +469,21 @@ export default function Cours() {
       const { count } = await supabase.from('inscriptions').select('*', { count: 'exact' }).eq('cours_id', c.id)
       return { ...c, nb_inscrits: count || 0 }
     }))
-    // Sauvegarder en cache pour usage hors ligne
+
+    // Pré-charger inscriptions + historique complet pour le mode hors ligne
+    const [{ data: toutesInscriptions }, { data: toutHistorique }] = await Promise.all([
+      supabase.from('inscriptions').select('cours_id, membre_id'),
+      supabase.from('historique').select('*').order('date', { ascending: false })
+    ])
+
+    // Sauvegarder TOUT en cache
     try {
       localStorage.setItem(CACHE_KEY, JSON.stringify({ cours: avecNb, membres: membresData || [], timestamp: Date.now() }))
+      localStorage.setItem('happycath_inscriptions_cache', JSON.stringify(toutesInscriptions || []))
+      localStorage.setItem('happycath_histo_cache', JSON.stringify(toutHistorique || []))
+      localStorage.setItem('happycath_membres_cache', JSON.stringify({ membres: membresData || [], cours: coursData || [], timestamp: Date.now() }))
     } catch(e) {}
+
     setCours(avecNb)
     setTousLesMembres(membresData || [])
     setLoading(false)
