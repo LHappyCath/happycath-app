@@ -281,11 +281,29 @@ export default function Membres() {
   const [modal, setModal] = useState(null) // null | 'nouveau' | {membre à éditer}
   const [toast, setToast] = useState(null)
 
+  const MEMBRES_CACHE = 'happycath_membres_cache'
+
   const loadData = useCallback(async () => {
+    if (!navigator.onLine) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(MEMBRES_CACHE) || 'null')
+        if (cached) {
+          setMembres(cached.membres || [])
+          setTousLesCours(cached.cours || [])
+          setLoading(false)
+          return
+        }
+      } catch(e) {}
+      setLoading(false)
+      return
+    }
     const [{ data: m }, { data: c }] = await Promise.all([
       supabase.from('membres').select('*').eq('actif', true).order('nom'),
       supabase.from('cours').select('*').eq('actif', true).order('jour').order('heure')
     ])
+    try {
+      localStorage.setItem(MEMBRES_CACHE, JSON.stringify({ membres: m||[], cours: c||[], timestamp: Date.now() }))
+    } catch(e) {}
     setMembres(m||[])
     setTousLesCours(c||[])
     setLoading(false)
