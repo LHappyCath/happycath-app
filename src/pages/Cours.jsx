@@ -402,7 +402,23 @@ export default function Cours() {
   const [toast, setToast] = useState(null)
   const [modalCours, setModalCours] = useState(null)
 
+  const CACHE_KEY = 'happycath_cours_cache'
+
   const loadData = useCallback(async () => {
+    // Si hors ligne, utiliser le cache localStorage
+    if (!navigator.onLine) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null')
+        if (cached) {
+          setCours(cached.cours || [])
+          setTousLesMembres(cached.membres || [])
+          setLoading(false)
+          return
+        }
+      } catch(e) {}
+      setLoading(false)
+      return
+    }
     const [{ data: coursData }, { data: membresData }] = await Promise.all([
       supabase.from('cours').select('*').eq('actif', true).order('jour').order('heure'),
       supabase.from('membres').select('id, nom, abonnement').eq('actif', true).order('nom')
@@ -411,6 +427,10 @@ export default function Cours() {
       const { count } = await supabase.from('inscriptions').select('*', { count: 'exact' }).eq('cours_id', c.id)
       return { ...c, nb_inscrits: count || 0 }
     }))
+    // Sauvegarder en cache pour usage hors ligne
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ cours: avecNb, membres: membresData || [], timestamp: Date.now() }))
+    } catch(e) {}
     setCours(avecNb)
     setTousLesMembres(membresData || [])
     setLoading(false)
