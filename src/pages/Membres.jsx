@@ -30,7 +30,7 @@ function Modal({ titre, onClose, children }) {
 
 // ─── FORMULAIRE MEMBRE ──────────────────────────────────────────
 function FormMembre({ initial, tousLesCours, onSave, onClose }) {
-  const [form, setForm] = useState(initial || { nom:'', prenom:'', telephone:'', email:'', notes:'' })
+  const [form, setForm] = useState(initial || { nom:'', telephone:'', email:'', notes:'' })
   const [inscriptions, setInscriptions] = useState([])
   const [saving, setSaving] = useState(false)
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
@@ -53,13 +53,11 @@ function FormMembre({ initial, tousLesCours, onSave, onClose }) {
     const abonnement = tousLesCours.filter(c=>inscriptions.includes(c.id)).map(c=>c.nom).join(' · ')
 
     if (initial?.id) {
-      await supabase.from('membres').update({ nom:form.nom, prenom:form.prenom, telephone:form.telephone, email:form.email, notes:form.notes, abonnement }).eq('id', initial.id)
-      // Mettre à jour les inscriptions
-      await supabase.from('inscriptions').delete().eq('membre_id', id)
+      await supabase.from('membres').update({ nom:form.nom, telephone:form.telephone, email:form.email, notes:form.notes, abonnement }).eq('id', initial.id)
+      await supabase.from('inscriptions').delete().eq('membre_id', initial.id)
     } else {
-      await supabase.from('membres').insert({ id, nom:form.nom, prenom:form.prenom, telephone:form.telephone, email:form.email, notes:form.notes, abonnement, actif:true })
+      await supabase.from('membres').insert({ id, nom:form.nom, telephone:form.telephone, email:form.email, notes:form.notes, abonnement, actif:true })
     }
-    // Réinsérer les inscriptions
     if (inscriptions.length > 0) {
       await supabase.from('inscriptions').insert(inscriptions.map(cId=>({ cours_id:cId, membre_id:id })))
     }
@@ -71,11 +69,9 @@ function FormMembre({ initial, tousLesCours, onSave, onClose }) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
-        <div><label style={{ fontSize:12, color:'#888', display:'block', marginBottom:4 }}>Nom *</label>
-          <input style={INPUT} value={form.nom} onChange={e=>set('nom',e.target.value)} placeholder="Dupont" /></div>
-        <div><label style={{ fontSize:12, color:'#888', display:'block', marginBottom:4 }}>Prénom</label>
-          <input style={INPUT} value={form.prenom||''} onChange={e=>set('prenom',e.target.value)} placeholder="Sophie" /></div>
+      <div>
+        <label style={{ fontSize:12, color:'#888', display:'block', marginBottom:4 }}>Nom complet *</label>
+        <input style={INPUT} value={form.nom} onChange={e=>set('nom',e.target.value)} placeholder="Sophie Dupont" autoFocus />
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
         <div><label style={{ fontSize:12, color:'#888', display:'block', marginBottom:4 }}>Téléphone</label>
@@ -189,7 +185,7 @@ function FicheMembre({ membre, tousLesCours, onClose, onEdit, onArchiver }) {
         <button onClick={onClose} style={{ ...BTN.ghost, padding:'8px 14px', fontSize:18 }}>←</button>
         <div style={{ width:52, height:52, borderRadius:'50%', background:coul+'20', color:coul, display:'flex', alignItems:'center', justifyContent:'center', fontSize:18, fontWeight:500, flexShrink:0 }}>{initiales(membre.nom)}</div>
         <div style={{ flex:1 }}>
-          <h2 style={{ fontSize:18, fontWeight:500, margin:'0 0 2px' }}>{membre.nom}{membre.prenom?' '+membre.prenom:''}</h2>
+          <h2 style={{ fontSize:18, fontWeight:500, margin:'0 0 2px' }}>{membre.nom}</h2>
           <p style={{ fontSize:13, color:'#888', margin:0 }}>{membre.abonnement||'Pas de cours'}</p>
         </div>
         <div style={{ display:'flex', gap:6 }}>
@@ -350,7 +346,7 @@ export default function Membres() {
 
   const filtered = membres.filter(m => {
     const s = search.toLowerCase()
-    return !s || m.nom.toLowerCase().includes(s) || (m.prenom||'').toLowerCase().includes(s) || (m.abonnement||'').toLowerCase().includes(s)
+    return !s || m.nom.toLowerCase().includes(s) || (m.abonnement||'').toLowerCase().includes(s)
   })
 
   if (vue === 'fiche' && selected) {
@@ -402,7 +398,7 @@ export default function Membres() {
                 onMouseLeave={e=>e.currentTarget.style.borderColor='rgba(0,0,0,0.08)'}>
                 <div style={{ width:40, height:40, borderRadius:'50%', background:coul+'20', color:coul, display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, fontWeight:500, flexShrink:0 }}>{initiales(m.nom)}</div>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <p style={{ fontSize:14, fontWeight:500, margin:'0 0 2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.nom}{m.prenom?' '+m.prenom:''}</p>
+                  <p style={{ fontSize:14, fontWeight:500, margin:'0 0 2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.nom}</p>
                   <p style={{ fontSize:12, color:'#888', margin:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.abonnement||'Aucun cours'}</p>
                 </div>
                 <span style={{ fontSize:10, padding:'2px 8px', borderRadius:8, background:'rgba(255,0,153,0.1)', color:'#FF0099', flexShrink:0 }}>Actif</span>
