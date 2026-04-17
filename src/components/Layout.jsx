@@ -1,14 +1,13 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
 
 const NAV_ITEMS = [
-  { to: '/',          icon: '🏠', label: 'Accueil',         section: null },
-  { to: '/cours',     icon: '📋', label: 'Cours & appel',   section: 'Terrain' },
-  { to: '/membres',   icon: '👥', label: 'Membres',         section: null },
-  { to: '/reglements',icon: '💶', label: 'Règlements',      section: 'Gestion' },
-  { to: '/budget',    icon: '📊', label: 'Budget',          section: null },
-  { to: '/factures',  icon: '🧾', label: 'Factures',        section: null },
+  { to: '/',           icon: '🏠', label: 'Accueil',       section: null },
+  { to: '/cours',      icon: '📋', label: 'Cours & appel', section: 'Terrain' },
+  { to: '/membres',    icon: '👥', label: 'Membres',       section: null },
+  { to: '/reglements', icon: '💶', label: 'Règlements',    section: 'Gestion' },
+  { to: '/budget',     icon: '📊', label: 'Budget',        section: null },
+  { to: '/factures',   icon: '🧾', label: 'Factures',      section: null },
 ]
 
 const BOTTOM_NAV = [
@@ -28,20 +27,30 @@ export default function Layout({ children }) {
     const off = () => setOnline(false)
     window.addEventListener('online', on)
     window.addEventListener('offline', off)
-    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+    return () => {
+      window.removeEventListener('online', on)
+      window.removeEventListener('offline', off)
+    }
   }, [])
 
-  const currentPage = NAV_ITEMS.find(n => n.to === location.pathname)?.label || 'L\'HappyCath'
-
+  const currentPage = NAV_ITEMS.find(n => n.to === location.pathname)?.label || "L'HappyCath"
   let lastSection = null
 
   return (
     <div className="app-layout">
+
+      {/* Bandeau hors ligne */}
+      {!online && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 500, background: '#1a1a1a', color: '#CCFF00', fontSize: 12, fontWeight: 500, textAlign: 'center', padding: '6px 16px', letterSpacing: '0.03em' }}>
+          Hors ligne — données du dernier chargement
+        </div>
+      )}
+
       {/* Sidebar desktop */}
-      <aside className="sidebar">
+      <aside className="sidebar" style={{ top: online ? 0 : 28 }}>
         <div className="sidebar-logo">
           <div className="sidebar-badge">🏋</div>
-          <h1>L'HappyCath<br/>Academy</h1>
+          <h1>L'HappyCath<br />Academy</h1>
           <span>Chavanod</span>
         </div>
         <nav>
@@ -70,7 +79,7 @@ export default function Layout({ children }) {
       </aside>
 
       {/* Topbar mobile */}
-      <div className="mobile-topbar">
+      <div className="mobile-topbar" style={{ top: online ? 0 : 28 }}>
         <div className="sidebar-badge" style={{ width: 32, height: 32, fontSize: 14, marginBottom: 0 }}>🏋</div>
         <h2>{currentPage}</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: online ? '#CCFF00' : '#888' }}>
