@@ -162,10 +162,31 @@ function EcranAppel({ cours, tousLesMembres, onValider, onAnnuler, appelExistant
   const [doublonInfo, setDoublonInfo] = useState(null)
 
   useEffect(() => {
+    // Hors ligne : reconstruire les inscrits depuis le cache cours+membres
+    if (!navigator.onLine) {
+      try {
+        const cached = JSON.parse(localStorage.getItem('happycath_cours_cache') || 'null')
+        if (cached) {
+          // Charger les inscriptions depuis le cache des inscriptions
+          const inscCache = JSON.parse(localStorage.getItem('happycath_inscriptions_cache') || 'null') || []
+          const inscritIds = inscCache.filter(i => i.cours_id === cours.id).map(i => i.membre_id)
+          const membres = (cached.membres || []).filter(m => inscritIds.includes(m.id)).sort((a, b) => a.nom.localeCompare(b.nom))
+          setInscrits(membres)
+          return
+        }
+      } catch(e) {}
+      return
+    }
     supabase.from('inscriptions').select('membre_id, membres(id, nom, abonnement)').eq('cours_id', cours.id)
       .then(({ data }) => {
         const list = (data || []).map(i => i.membres).filter(Boolean).sort((a, b) => a.nom.localeCompare(b.nom))
         setInscrits(list)
+        // Sauvegarder toutes les inscriptions en cache
+        supabase.from('inscriptions').select('cours_id, membre_id').then(({ data: allInsc }) => {
+          if (allInsc) {
+            try { localStorage.setItem('happycath_inscriptions_cache', JSON.stringify(allInsc)) } catch(e) {}
+          }
+        })
       })
   }, [cours.id])
 
@@ -189,6 +210,12 @@ function EcranAppel({ cours, tousLesMembres, onValider, onAnnuler, appelExistant
   async function handleValider() {
     setSaving(true)
     if (!appelExistant) {
+      // Hors ligne : pas de vérification doublon, on sauvegarde en local
+      if (!navigator.onLine) {
+        await sauvegarder(null)
+        setSaving(false)
+        return
+      }
       const { data: doublon } = await supabase.from('historique').select('id,presents,guests').eq('cours_id', cours.id).eq('date', date).maybeSingle()
       if (doublon) { setDoublonInfo(doublon); setSaving(false); return }
     }
@@ -328,7 +355,22 @@ function HistoriqueCours({ cours, tousLesMembres, onRetour, onEditer, onSupprime
   const [search, setSearch] = useState('')
 
   const loadHisto = useCallback(async () => {
+    if (!navigator.onLine) {
+      try {
+        const cached = JSON.parse(localStorage.getItem('happycath_histo_cache') || '[]')
+        const filtered = cached.filter(h => h.cours_id === cours.id)
+        setHistorique(filtered)
+      } catch(e) { setHistorique([]) }
+      setLoading(false)
+      return
+    }
     const { data } = await supabase.from('historique').select('*').eq('cours_id', cours.id).order('date', { ascending: false })
+    // Mettre à jour le cache historique
+    try {
+      const allCache = JSON.parse(localStorage.getItem('happycath_histo_cache') || '[]')
+      const autresCours = allCache.filter(h => h.cours_id !== cours.id)
+      localStorage.setItem('happycath_histo_cache', JSON.stringify([...(data||[]), ...autresCours]))
+    } catch(e) {}
     setHistorique(data || [])
     setLoading(false)
   }, [cours.id])
@@ -438,6 +480,8 @@ export default function Cours() {
 
   useEffect(() => {
     loadData()
+    // Realtime seulement si en ligne
+    if (!navigator.onLine) return
     const sub = supabase.channel('cours_ch')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cours' }, loadData)
       .subscribe()
@@ -463,12 +507,47 @@ export default function Cours() {
   async function validerAppel({ id, coursId, coursNom, date, presents, guests }) {
     const hId = id || ('h' + Date.now().toString(36))
     const payload = { id: hId, cours_id: coursId, cours_nom: coursNom, date, presents, guests }
+
+    if (!navigator.onLine) {
+      // Sauvegarder dans la file d'attente locale
+      try {
+        const queue = JSON.parse(localStorage.getItem('happycath_sync_queue') || '[]')
+        queue.push({ type: id ? 'update' : 'insert', table: 'historique', payload, timestamp: Date.now() })
+        localStorage.setItem('happycath_sync_queue', JSON.stringify(queue))
+        // Aussi mettre à jour le cache local de l'historique
+        const histoCache = JSON.parse(localStorage.getItem('happycath_histo_cache') || '[]')
+        const idx = histoCache.findIndex(h => h.id === hId)
+        if (idx >= 0) histoCache[idx] = payload; else histoCache.unshift(payload)
+        localStorage.setItem('happycath_histo_cache', JSON.stringify(histoCache))
+      } catch(e) {}
+      showToast(`Appel sauvegardé localement — sera synchronisé dès le retour du réseau`)
+      setVue('planning'); setCoursSelectionne(null); setAppelExistant(null)
+      return
+    }
+
     if (id) {
       await supabase.from('historique').update(payload).eq('id', id)
     } else {
       await supabase.from('historique').insert(payload)
     }
-    showToast(`Appel enregistré — ${presents.length + guests.length} présent(s)`)
+
+    // Synchroniser la file d'attente si elle existe
+    try {
+      const queue = JSON.parse(localStorage.getItem('happycath_sync_queue') || '[]')
+      if (queue.length > 0) {
+        for (const item of queue) {
+          if (item.type === 'insert') await supabase.from(item.table).insert(item.payload)
+          if (item.type === 'update') await supabase.from(item.table).update(item.payload).eq('id', item.payload.id)
+        }
+        localStorage.removeItem('happycath_sync_queue')
+        showToast(`Appel enregistré + ${queue.length} appel(s) hors ligne synchronisé(s)`)
+      } else {
+        showToast(`Appel enregistré — ${presents.length + guests.length} présent(s)`)
+      }
+    } catch(e) {
+      showToast(`Appel enregistré — ${presents.length + guests.length} présent(s)`)
+    }
+
     setVue('planning'); setCoursSelectionne(null); setAppelExistant(null)
     loadData()
   }
