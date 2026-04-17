@@ -312,8 +312,17 @@ export default function Membres() {
       supabase.from('membres').select('*').eq('actif', true).order('nom'),
       supabase.from('cours').select('*').eq('actif', true).order('jour').order('heure')
     ])
+
+    // Pré-charger inscriptions + historique pour le mode hors ligne
+    const [{ data: inscriptions }, { data: historique }] = await Promise.all([
+      supabase.from('inscriptions').select('cours_id, membre_id'),
+      supabase.from('historique').select('*').order('date', { ascending: false })
+    ])
+
     try {
       localStorage.setItem(MEMBRES_CACHE, JSON.stringify({ membres: m||[], cours: c||[], timestamp: Date.now() }))
+      localStorage.setItem('happycath_inscriptions_cache', JSON.stringify(inscriptions || []))
+      localStorage.setItem('happycath_histo_cache', JSON.stringify(historique || []))
     } catch(e) {}
     setMembres(m||[])
     setTousLesCours(c||[])
