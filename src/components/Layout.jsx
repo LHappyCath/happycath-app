@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useData } from '../lib/store'
 
 const NAV_ITEMS = [
   { to: '/',           icon: '🏠', label: 'Accueil',         section: null },
@@ -21,29 +21,29 @@ const BOTTOM_NAV = [
 
 export default function Layout({ children }) {
   const location = useLocation()
-  const [online, setOnline] = useState(navigator.onLine)
-
-  useEffect(() => {
-    const on = () => setOnline(true)
-    const off = () => setOnline(false)
-    window.addEventListener('online', on)
-    window.addEventListener('offline', off)
-    return () => {
-      window.removeEventListener('online', on)
-      window.removeEventListener('offline', off)
-    }
-  }, [])
-
+  const { online, syncing, queueSize } = useData()
   const currentPage = NAV_ITEMS.find(n => n.to === location.pathname)?.label || "L'HappyCath"
   let lastSection = null
+
+  const syncLabel = syncing ? 'Synchronisation…'
+    : !online && queueSize > 0 ? `Hors ligne · ${queueSize} en attente`
+    : !online ? 'Hors ligne'
+    : 'Synchronisé'
+
+  const syncColor = syncing ? '#CCFF00'
+    : !online && queueSize > 0 ? '#f59e0b'
+    : !online ? '#888'
+    : '#CCFF00'
 
   return (
     <div className="app-layout">
 
       {/* Bandeau hors ligne */}
       {!online && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 500, background: '#1a1a1a', color: '#CCFF00', fontSize: 12, fontWeight: 500, textAlign: 'center', padding: '6px 16px', letterSpacing: '0.03em' }}>
-          Hors ligne — données du dernier chargement
+        <div style={{ position:'fixed', top:0, left:0, right:0, zIndex:500, background:'#1a1a1a', color: queueSize>0?'#f59e0b':'#CCFF00', fontSize:12, fontWeight:500, textAlign:'center', padding:'6px 16px', letterSpacing:'0.03em' }}>
+          {queueSize > 0
+            ? `Hors ligne — ${queueSize} modification${queueSize>1?'s':''} en attente de synchronisation`
+            : 'Hors ligne — données du dernier chargement'}
         </div>
       )}
 
@@ -74,18 +74,18 @@ export default function Layout({ children }) {
           })}
         </nav>
         <div className="sync-status">
-          <div className={`sync-dot${online ? '' : ' offline'}`} />
-          {online ? 'Synchronisé' : 'Hors ligne'}
+          <div className="sync-dot" style={{ background: syncColor }} />
+          <span style={{ color: syncColor }}>{syncLabel}</span>
         </div>
       </aside>
 
       {/* Topbar mobile */}
       <div className="mobile-topbar" style={{ top: online ? 0 : 28 }}>
-        <div className="sidebar-badge" style={{ width: 32, height: 32, fontSize: 14, marginBottom: 0 }}>🏋</div>
+        <div className="sidebar-badge" style={{ width:32, height:32, fontSize:14, marginBottom:0 }}>🏋</div>
         <h2>{currentPage}</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: online ? '#CCFF00' : '#888' }}>
-          <div className={`sync-dot${online ? '' : ' offline'}`} />
-          {online ? 'En ligne' : 'Hors ligne'}
+        <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:11, color:syncColor }}>
+          <div className="sync-dot" style={{ background:syncColor }} />
+          {!online && queueSize > 0 ? `${queueSize} att.` : online ? 'En ligne' : 'Hors ligne'}
         </div>
       </div>
 
