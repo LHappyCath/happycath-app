@@ -2,20 +2,21 @@ import { NavLink, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 
 const NAV_ITEMS = [
-  { to: '/',           icon: '🏠', label: 'Accueil',       section: null },
-  { to: '/cours',      icon: '📋', label: 'Cours & appel', section: 'Terrain' },
-  { to: '/membres',    icon: '👥', label: 'Membres',       section: null },
-  { to: '/reglements', icon: '💶', label: 'Règlements',    section: 'Gestion' },
-  { to: '/budget',     icon: '📊', label: 'Budget',        section: null },
-  { to: '/factures',   icon: '🧾', label: 'Factures',      section: null },
+  { to: '/',           icon: '🏠', label: 'Accueil',         section: null },
+  { to: '/dashboard',  icon: '📈', label: 'Tableau de bord', section: null },
+  { to: '/cours',      icon: '📋', label: 'Cours & appel',   section: 'Terrain' },
+  { to: '/membres',    icon: '👥', label: 'Membres',         section: null },
+  { to: '/reglements', icon: '💶', label: 'Règlements',      section: 'Gestion' },
+  { to: '/budget',     icon: '📊', label: 'Budget',          section: null },
+  { to: '/factures',   icon: '🧾', label: 'Factures',        section: null },
 ]
 
 const BOTTOM_NAV = [
-  { to: '/',           icon: '🏠', label: 'Accueil' },
-  { to: '/cours',      icon: '📋', label: 'Cours' },
-  { to: '/membres',    icon: '👥', label: 'Membres' },
-  { to: '/reglements', icon: '💶', label: 'Règlements' },
-  { to: '/budget',     icon: '📊', label: 'Budget' },
+  { to: '/',          icon: '🏠', label: 'Accueil' },
+  { to: '/dashboard', icon: '📈', label: 'Stats' },
+  { to: '/cours',     icon: '📋', label: 'Cours' },
+  { to: '/membres',   icon: '👥', label: 'Membres' },
+  { to: '/budget',    icon: '📊', label: 'Budget' },
 ]
 
 export default function Layout({ children }) {
