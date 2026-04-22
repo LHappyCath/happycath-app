@@ -32,17 +32,18 @@ function Modal({ titre, onClose, children }) {
 }
 
 function FormCours({ initial, onSave, onClose }) {
-  const [form, setForm] = useState(initial || { nom: '', jour: 1, heure: '09h00', duree: '60min', coach: '' })
+  const [form, setForm] = useState(initial || { nom: '', jour: 1, heure: '09h00', duree: '60min', coach: '', capacite_max: 15 })
   const [saving, setSaving] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   async function save() {
     if (!form.nom.trim() || !form.coach.trim()) return
     setSaving(true)
+    const payload = { nom: form.nom, jour: parseInt(form.jour), heure: form.heure, duree: form.duree, coach: form.coach, capacite_max: parseInt(form.capacite_max) || 15 }
     if (initial?.id) {
-      await supabase.from('cours').update({ nom: form.nom, jour: parseInt(form.jour), heure: form.heure, duree: form.duree, coach: form.coach }).eq('id', initial.id)
+      await supabase.from('cours').update(payload).eq('id', initial.id)
     } else {
-      await supabase.from('cours').insert({ id: 'c' + Date.now().toString(36), nom: form.nom, jour: parseInt(form.jour), heure: form.heure, duree: form.duree, coach: form.coach, actif: true })
+      await supabase.from('cours').insert({ id: 'c' + Date.now().toString(36), ...payload, actif: true })
     }
     setSaving(false)
     onSave()
@@ -66,7 +67,7 @@ function FormCours({ initial, onSave, onClose }) {
           <input style={INPUT} value={form.heure} onChange={e => set('heure', e.target.value)} placeholder="09h00" />
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
         <div>
           <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Durée</label>
           <input style={INPUT} value={form.duree} onChange={e => set('duree', e.target.value)} placeholder="60min" />
@@ -74,6 +75,10 @@ function FormCours({ initial, onSave, onClose }) {
         <div>
           <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Coach *</label>
           <input style={INPUT} value={form.coach} onChange={e => set('coach', e.target.value)} placeholder="Prénom" />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, color: '#888', display: 'block', marginBottom: 4 }}>Places max</label>
+          <input style={INPUT} type="number" min="1" max="100" value={form.capacite_max || 15} onChange={e => set('capacite_max', e.target.value)} placeholder="15" />
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
