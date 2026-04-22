@@ -32,13 +32,17 @@ function Modal({ titre, onClose, children }) {
 function FormMembre({ initial, tousLesCours, onSave, onClose }) {
   const [form, setForm] = useState(initial || { nom:'', telephone:'', email:'', notes:'' })
   const [inscriptions, setInscriptions] = useState([])
+  const [abo, setAbo] = useState({ type:'Annuel', date_debut:'', date_fin:'', montant:'' })
   const [saving, setSaving] = useState(false)
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
+  const setAboField = (k,v) => setAbo(a=>({...a,[k]:v}))
 
   useEffect(() => {
     if (initial?.id) {
       supabase.from('inscriptions').select('cours_id').eq('membre_id', initial.id)
         .then(({ data }) => setInscriptions((data||[]).map(i=>i.cours_id)))
+      supabase.from('abonnements').select('*').eq('membre_id', initial.id).eq('saison','2025-2026').eq('statut','actif').maybeSingle()
+        .then(({ data }) => { if (data) setAbo({ type:data.type, date_debut:data.date_debut||'', date_fin:data.date_fin||'', montant:data.montant||'' }) })
     }
   }, [initial?.id])
 
@@ -61,11 +65,19 @@ function FormMembre({ initial, tousLesCours, onSave, onClose }) {
     if (inscriptions.length > 0) {
       await supabase.from('inscriptions').insert(inscriptions.map(cId=>({ cours_id:cId, membre_id:id })))
     }
+    // Sauvegarder l'abonnement si renseigné
+    if (abo.date_debut) {
+      await supabase.from('abonnements').delete().eq('membre_id', id).eq('saison','2025-2026')
+      await supabase.from('abonnements').insert({ membre_id:id, saison:'2025-2026', type:abo.type, date_debut:abo.date_debut, date_fin:abo.date_fin||null, montant:abo.montant||null, statut:'actif' })
+    }
     setSaving(false)
     onSave()
   }
 
   const coursByJour = JOURS_FULL.map((j,i) => ({ jour:j, idx:i, cours:tousLesCours.filter(c=>c.jour===i) })).filter(g=>g.cours.length>0)
+  const SAISON_DEBUT = '2025-09-01'
+  const SAISON_FIN = '2026-07-31'
+  const datesFin = { 'Annuel': SAISON_FIN, 'Semestriel': '2026-01-31', 'T1': '2025-12-31', 'T2': '2026-03-31', 'T3': SAISON_FIN, 'Seance': '' }
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
@@ -78,6 +90,43 @@ function FormMembre({ initial, tousLesCours, onSave, onClose }) {
           <input style={INPUT} value={form.telephone||''} onChange={e=>set('telephone',e.target.value)} placeholder="06 …" /></div>
         <div><label style={{ fontSize:12, color:'#888', display:'block', marginBottom:4 }}>Email</label>
           <input style={INPUT} value={form.email||''} onChange={e=>set('email',e.target.value)} placeholder="@" /></div>
+      </div>
+
+      {/* Abonnement */}
+      <div style={{ background:'#f8f8f8', borderRadius:10, padding:12 }}>
+        <label style={{ fontSize:12, color:'#888', display:'block', marginBottom:8, fontWeight:500 }}>Abonnement saison 2025/2026</label>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
+          <div>
+            <label style={{ fontSize:11, color:'#aaa', display:'block', marginBottom:4 }}>Type</label>
+            <select style={{ ...INPUT }} value={abo.type} onChange={e => {
+              const t = e.target.value
+              setAboField('type', t)
+              if (!abo.date_debut) setAboField('date_debut', SAISON_DEBUT)
+              if (datesFin[t]) setAboField('date_fin', datesFin[t])
+            }}>
+              <option value="Annuel">Annuel</option>
+              <option value="Semestriel">Semestriel</option>
+              <option value="T1">Trimestre 1 (sept–déc)</option>
+              <option value="T2">Trimestre 2 (janv–mars)</option>
+              <option value="T3">Trimestre 3 (avr–juil)</option>
+              <option value="Seance">À la séance</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:'#aaa', display:'block', marginBottom:4 }}>Montant (€)</label>
+            <input style={INPUT} type="number" value={abo.montant||''} onChange={e=>setAboField('montant',e.target.value)} placeholder="ex: 335" />
+          </div>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <div>
+            <label style={{ fontSize:11, color:'#aaa', display:'block', marginBottom:4 }}>Début</label>
+            <input style={INPUT} type="date" value={abo.date_debut||''} onChange={e=>setAboField('date_debut',e.target.value)} />
+          </div>
+          <div>
+            <label style={{ fontSize:11, color:'#aaa', display:'block', marginBottom:4 }}>Fin</label>
+            <input style={INPUT} type="date" value={abo.date_fin||''} onChange={e=>setAboField('date_fin',e.target.value)} />
+          </div>
+        </div>
       </div>
 
       <div>
@@ -106,6 +155,25 @@ function FormMembre({ initial, tousLesCours, onSave, onClose }) {
           {saving ? 'Enregistrement…' : initial ? 'Modifier' : 'Créer le membre'}
         </button>
       </div>
+    </div>
+  )
+}
+
+// ─── AFFICHAGE ABONNEMENT ───────────────────────────────────────
+function AboInfo({ membreId }) {
+  const [abo, setAbo] = useState(null)
+  useEffect(() => {
+    supabase.from('abonnements').select('*').eq('membre_id', membreId).eq('saison','2025-2026').eq('statut','actif').maybeSingle()
+      .then(({ data }) => setAbo(data))
+  }, [membreId])
+  if (!abo) return null
+  const debut = abo.date_debut ? new Date(abo.date_debut+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'}) : '—'
+  const fin = abo.date_fin ? new Date(abo.date_fin+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'}) : '—'
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+      <span style={{ fontSize:12, fontWeight:500, padding:'3px 10px', borderRadius:8, background:'rgba(255,0,153,0.1)', color:'#FF0099' }}>{abo.type}</span>
+      <span style={{ fontSize:12, color:'#888' }}>{debut} → {fin}</span>
+      {abo.montant && <span style={{ fontSize:12, color:'#888' }}>· {Number(abo.montant).toLocaleString('fr-FR')} €</span>}
     </div>
   )
 }
@@ -194,13 +262,17 @@ function FicheMembre({ membre, tousLesCours, onClose, onEdit, onArchiver }) {
         </div>
       </div>
 
-      {/* Contact */}
-      {(membre.telephone||membre.email) && (
-        <div style={{ background:'#f8f8f8', borderRadius:10, padding:'10px 14px', marginBottom:16, display:'flex', gap:16, flexWrap:'wrap' }}>
-          {membre.telephone && <span style={{ fontSize:13 }}>📞 {membre.telephone}</span>}
-          {membre.email && <span style={{ fontSize:13 }}>✉️ {membre.email}</span>}
-        </div>
-      )}
+      {/* Contact + Abonnement */}
+      <div style={{ background:'#f8f8f8', borderRadius:10, padding:'12px 14px', marginBottom:16 }}>
+        {(membre.telephone||membre.email) && (
+          <div style={{ display:'flex', gap:16, flexWrap:'wrap', marginBottom: membre.abonnement?10:0 }}>
+            {membre.telephone && <span style={{ fontSize:13 }}>📞 {membre.telephone}</span>}
+            {membre.email && <span style={{ fontSize:13 }}>✉️ {membre.email}</span>}
+          </div>
+        )}
+        {/* Abonnement depuis la table abonnements */}
+        <AboInfo membreId={membre.id} />
+      </div>
 
       {loading ? <p style={{ color:'#888', fontSize:14 }}>Calcul des statistiques…</p> : stats && <>
         {/* KPIs globaux */}
