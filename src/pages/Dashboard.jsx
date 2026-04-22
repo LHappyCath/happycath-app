@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useData } from '../lib/store'
 import { supabase } from '../lib/supabase'
 
 const JOURS = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam']
@@ -48,15 +49,13 @@ function KpiCard({ val, lbl, color, onClick }) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { cours: storeC, membres: storeM, inscriptions: storeI, historique: storeH, abonnements: storeA, loading: storeLoading } = useData()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(null)
 
-  // Tri tableau cours
   const [coursSort, setCoursSort] = useState({ col:'nom', dir:'asc' })
-  // Tri tableau membres
   const [membresSort, setMembresSort] = useState({ col:'nom', dir:'asc' })
-  // Filtre membres
   const [filtreStatut, setFiltreStatut] = useState('tous')
   const [filtreCours, setFiltreCours] = useState('tous')
   const [searchMembre, setSearchMembre] = useState('')
@@ -64,28 +63,20 @@ export default function Dashboard() {
   const CACHE_KEY = 'happycath_dashboard_cache'
 
   const loadDashboard = useCallback(async () => {
-    if (!navigator.onLine) {
+    // Utiliser les données du store global — toujours à jour
+    const membres = storeM, cours = storeC, inscriptions = storeI, historique = storeH, abonnements = storeA
+    if (!membres.length && !cours.length) {
+      // Fallback cache si store vide
       try {
         const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null')
         if (cached) { setData(cached); setLoading(false); return }
       } catch(e) {}
       setLoading(false); return
     }
-
-    const [
-      { data: membres },
-      { data: cours },
-      { data: inscriptions },
-      { data: historique },
       { data: abonnements }
     ] = await Promise.all([
       supabase.from('membres').select('*').eq('actif', true).order('nom'),
       supabase.from('cours').select('*').eq('actif', true).order('jour').order('heure'),
-      supabase.from('inscriptions').select('*'),
-      supabase.from('historique').select('*').order('date', { ascending: false }),
-      supabase.from('abonnements').select('*').eq('saison', '2025-2026')
-    ])
-
     // Stats par cours
     const statsCours = (cours || []).map(c => {
       const inscrits = (inscriptions || []).filter(i => i.cours_id === c.id)
@@ -161,7 +152,9 @@ export default function Dashboard() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { loadDashboard() }, [loadDashboard])
+  useEffect(() => { 
+    if (!storeLoading) loadDashboard() 
+  }, [loadDashboard, storeLoading, storeM, storeC, storeH, storeI, storeA])
 
   function sortData(arr, col, dir) {
     return [...arr].sort((a, b) => {
