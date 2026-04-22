@@ -3,6 +3,7 @@ import Layout from './components/Layout'
 import Accueil from './pages/Accueil'
 import Membres from './pages/Membres'
 import Cours from './pages/Cours'
+import Dashboard from './pages/Dashboard'
 import { Reglements, Budget, Factures } from './pages/AutresPages'
 import './index.css'
 
@@ -12,6 +13,7 @@ export default function App() {
       <Layout>
         <Routes>
           <Route path="/" element={<Accueil />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/cours" element={<Cours />} />
           <Route path="/membres" element={<Membres />} />
           <Route path="/reglements" element={<Reglements />} />
