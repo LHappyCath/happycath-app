@@ -245,26 +245,29 @@ export default function Dashboard() {
       )}
 
       <div style={{ display:'grid', gridTemplateColumns:'repeat(2,minmax(0,1fr))', gap:12, marginBottom:12 }}>
-        {/* Performance cours */}
+        {/* Assiduité par cours */}
         <div style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:12, padding:16 }}>
-          <p style={{ fontSize:11, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:12 }}>Performance des cours</p>
-          {data.statsCours.slice(0, 7).map(c => {
+          <p style={{ fontSize:11, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:4 }}>Assiduité par cours</p>
+          <p style={{ fontSize:11, color:'#bbb', marginBottom:12 }}>% de présence parmi les inscrits</p>
+          {data.statsCours.map(c => {
             const tag = labelTaux(c.taux_assiduite)
-            const remplissage = c.taux_remplissage
             return (
               <div key={c.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 0', borderTop:'0.5px solid #f5f5f5' }}>
                 <div style={{ flex:1, minWidth:0 }}>
                   <p style={{ fontSize:13, fontWeight:500, margin:'0 0 1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.nom}</p>
-                  <p style={{ fontSize:11, color:'#aaa', margin:0 }}>{JOURS[c.jour]} {c.heure} · {c.nb_inscrits}/{c.capacite_max} inscrits</p>
+                  <p style={{ fontSize:11, color:'#aaa', margin:0 }}>{JOURS[c.jour]} {c.heure} · {c.coach} · {c.nb_appels} appel{c.nb_appels!==1?'s':''}</p>
                 </div>
                 <div style={{ textAlign:'right', flexShrink:0 }}>
                   <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:3 }}>
                     <div style={{ width:50, height:5, background:'#f0f0f0', borderRadius:3, overflow:'hidden' }}>
                       <div style={{ width:`${c.taux_assiduite}%`, height:'100%', background:couleurTaux(c.taux_assiduite), borderRadius:3 }}/>
                     </div>
-                    <span style={{ fontSize:12, fontWeight:500, color:couleurTaux(c.taux_assiduite), minWidth:30 }}>{c.taux_assiduite}%</span>
+                    <span style={{ fontSize:12, fontWeight:500, color: c.nb_appels===0?'#ccc':couleurTaux(c.taux_assiduite), minWidth:30 }}>
+                      {c.nb_appels === 0 ? '—' : `${c.taux_assiduite}%`}
+                    </span>
                   </div>
-                  <span style={{ fontSize:10, padding:'1px 7px', borderRadius:6, background:tag.bg, color:tag.color }}>{tag.label}</span>
+                  {c.nb_appels > 0 && <span style={{ fontSize:10, padding:'1px 7px', borderRadius:6, background:tag.bg, color:tag.color }}>{tag.label}</span>}
+                  {c.nb_appels === 0 && <span style={{ fontSize:10, color:'#ccc' }}>Pas d'appel</span>}
                 </div>
               </div>
             )
@@ -273,15 +276,16 @@ export default function Dashboard() {
 
         {/* Remplissage des cours */}
         <div style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:12, padding:16 }}>
-          <p style={{ fontSize:11, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:12 }}>Taux de remplissage</p>
-          {data.statsCours.slice(0, 7).map(c => {
+          <p style={{ fontSize:11, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:4 }}>Remplissage des cours</p>
+          <p style={{ fontSize:11, color:'#bbb', marginBottom:12 }}>Inscrits vs capacité max de la salle</p>
+          {data.statsCours.map(c => {
             const pct = Math.min(100, c.taux_remplissage)
             const color = pct >= 80 ? '#FF0099' : pct >= 60 ? '#BA7517' : '#E24B4A'
             return (
               <div key={c.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 0', borderTop:'0.5px solid #f5f5f5' }}>
                 <div style={{ flex:1, minWidth:0 }}>
                   <p style={{ fontSize:13, fontWeight:500, margin:'0 0 1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.nom}</p>
-                  <p style={{ fontSize:11, color:'#aaa', margin:0 }}>{c.nb_inscrits} / {c.capacite_max} places</p>
+                  <p style={{ fontSize:11, color:'#aaa', margin:0 }}>{JOURS[c.jour]} {c.heure} · {c.nb_inscrits}/{c.capacite_max} inscrits</p>
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
                   <div style={{ width:60, height:8, background:'#f0f0f0', borderRadius:4, overflow:'hidden' }}>
@@ -297,24 +301,26 @@ export default function Dashboard() {
 
       {/* Liste membres avec taux */}
       <div style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:12, padding:16 }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12, flexWrap:'wrap', gap:8 }}>
-          <p style={{ fontSize:11, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.07em', margin:0 }}>Membres — présence & rattrapages</p>
-          <div style={{ display:'flex', gap:6 }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10, flexWrap:'wrap', gap:8 }}>
+          <p style={{ fontSize:11, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.07em', margin:0 }}>
+            Membres ({data.statsMembres.length}) — assiduité & rattrapages
+          </p>
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
             {['tous','faibles','rattrapages','absents'].map(f => (
               <button key={f} onClick={() => setPeriode(f)}
                 style={{ fontSize:11, padding:'4px 10px', borderRadius:12, border:`0.5px solid ${periode===f?'#FF0099':'rgba(0,0,0,0.15)'}`, background:periode===f?'#FF0099':'transparent', color:periode===f?'#fff':'#666', cursor:'pointer' }}>
-                {f==='tous'?'Tous':f==='faibles'?'< 40%':f==='rattrapages'?'À rattraper':'Absents'}
+                {f==='tous'?'Tous':f==='faibles'?'Assiduité < 40%':f==='rattrapages'?'À rattraper':'Absents > 30j'}
               </button>
             ))}
           </div>
         </div>
 
         {/* Header tableau */}
-        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'4px 0 8px', fontSize:11, color:'#aaa', fontWeight:500 }}>
-          <span style={{ flex:1 }}>Membre</span>
-          <span style={{ minWidth:120, fontSize:11 }}>Abonnement</span>
-          <span style={{ minWidth:80, textAlign:'center' }}>Présence</span>
-          <span style={{ minWidth:60, textAlign:'center' }}>À rattraper</span>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 110px 90px 70px', gap:8, padding:'4px 0 8px', fontSize:11, color:'#aaa', fontWeight:500, borderBottom:'0.5px solid #f0f0f0' }}>
+          <span>Membre</span>
+          <span>Abonnement</span>
+          <span style={{ textAlign:'center' }}>Assiduité</span>
+          <span style={{ textAlign:'center' }}>Rattrapages</span>
         </div>
 
         {data.statsMembres
@@ -324,33 +330,34 @@ export default function Dashboard() {
             if (periode === 'absents') return m.joursAbsent > 30 && m.joursAbsent < 900
             return true
           })
-          .slice(0, 20)
           .map(m => {
             const c = m.taux !== null ? couleurTaux(m.taux) : '#ccc'
+            const aboLabel = m.abo
+              ? `${m.abo.type}`
+              : m.abonnement
+                ? m.abonnement.split('·')[0].trim().substring(0, 14)
+                : '—'
             return (
               <div key={m.id} onClick={() => navigate('/membres')}
-                style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 0', borderTop:'0.5px solid #f5f5f5', cursor:'pointer' }}
+                style={{ display:'grid', gridTemplateColumns:'1fr 110px 90px 70px', gap:8, padding:'7px 0', borderTop:'0.5px solid #f8f8f8', cursor:'pointer', alignItems:'center' }}
                 onMouseEnter={e => e.currentTarget.style.background='#fafafa'}
                 onMouseLeave={e => e.currentTarget.style.background='transparent'}>
-                <span style={{ flex:1, fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.nom}</span>
-                <span style={{ minWidth:120, fontSize:11, color:'#aaa', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                  {m.abo ? `${m.abo.type} · exp. ${new Date(m.abo.date_fin+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short'})}` : m.abonnement || '—'}
-                </span>
-                <div style={{ minWidth:80, display:'flex', alignItems:'center', gap:5, justifyContent:'center' }}>
+                <span style={{ fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.nom}</span>
+                <span style={{ fontSize:11, color:'#aaa', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{aboLabel}</span>
+                <div style={{ display:'flex', alignItems:'center', gap:5, justifyContent:'center' }}>
                   {m.taux !== null ? <>
-                    <div style={{ width:40, height:4, background:'#f0f0f0', borderRadius:2, overflow:'hidden' }}>
+                    <div style={{ width:36, height:4, background:'#f0f0f0', borderRadius:2, overflow:'hidden', flexShrink:0 }}>
                       <div style={{ width:`${m.taux}%`, height:'100%', background:c, borderRadius:2 }}/>
                     </div>
-                    <span style={{ fontSize:12, fontWeight:500, color:c }}>{m.taux}%</span>
+                    <span style={{ fontSize:12, fontWeight:500, color:c, minWidth:28 }}>{m.taux}%</span>
                   </> : <span style={{ fontSize:12, color:'#ccc' }}>—</span>}
                 </div>
-                <span style={{ minWidth:60, textAlign:'center', fontSize:13, fontWeight: m.solde>0?'500':'400', color: m.solde>3?'#E24B4A':m.solde>0?'#b45309':'#ccc' }}>
+                <span style={{ textAlign:'center', fontSize:13, fontWeight: m.solde>0?'500':'400', color: m.solde>3?'#E24B4A':m.solde>0?'#b45309':'#ccc' }}>
                   {m.solde > 0 ? m.solde : '—'}
                 </span>
               </div>
             )
           })}
-        {data.statsMembres.length > 20 && <p style={{ fontSize:12, color:'#aaa', textAlign:'center', padding:'10px 0' }}>… {data.statsMembres.length - 20} autres membres</p>}
       </div>
 
       {/* ── MODALS ── */}

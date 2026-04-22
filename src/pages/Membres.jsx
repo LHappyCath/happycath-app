@@ -389,19 +389,49 @@ export default function Membres() {
 
       {loading ? <p style={{ color:'#888', fontSize:14 }}>Chargement…</p> : (
         <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+          {/* Header */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 80px 60px', gap:8, padding:'0 14px 6px', fontSize:11, color:'#aaa', fontWeight:500 }}>
+            <span>Membre</span>
+            <span style={{ textAlign:'center' }}>Assiduité</span>
+            <span style={{ textAlign:'center' }}>Rattrap.</span>
+          </div>
           {filtered.map(m => {
             const coul = couleur(m.id)
+            // Taux depuis le cache si disponible
+            let taux = null, solde = 0
+            try {
+              const statsCache = JSON.parse(localStorage.getItem('happycath_dashboard_cache') || 'null')
+              if (statsCache) {
+                const stat = statsCache.statsMembres?.find(s => s.id === m.id)
+                if (stat) { taux = stat.taux; solde = stat.solde || 0 }
+              }
+            } catch(e) {}
+            const tauxColor = taux !== null ? (taux >= 80 ? '#0f6e56' : taux >= 60 ? '#BA7517' : '#E24B4A') : '#ccc'
             return (
               <div key={m.id} onClick={() => { setSelected(m); setVue('fiche') }}
-                style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:12, padding:'12px 14px', display:'flex', alignItems:'center', gap:12, cursor:'pointer', transition:'border-color .15s' }}
+                style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:12, padding:'10px 14px', display:'grid', gridTemplateColumns:'1fr 80px 60px', gap:8, alignItems:'center', cursor:'pointer', transition:'border-color .15s' }}
                 onMouseEnter={e=>e.currentTarget.style.borderColor='#FF0099'}
                 onMouseLeave={e=>e.currentTarget.style.borderColor='rgba(0,0,0,0.08)'}>
-                <div style={{ width:40, height:40, borderRadius:'50%', background:coul+'20', color:coul, display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, fontWeight:500, flexShrink:0 }}>{initiales(m.nom)}</div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <p style={{ fontSize:14, fontWeight:500, margin:'0 0 2px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.nom}</p>
-                  <p style={{ fontSize:12, color:'#888', margin:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.abonnement||'Aucun cours'}</p>
+                <div style={{ display:'flex', alignItems:'center', gap:10, minWidth:0 }}>
+                  <div style={{ width:36, height:36, borderRadius:'50%', background:coul+'20', color:coul, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:500, flexShrink:0 }}>{initiales(m.nom)}</div>
+                  <div style={{ minWidth:0 }}>
+                    <p style={{ fontSize:14, fontWeight:500, margin:'0 0 1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.nom}</p>
+                    <p style={{ fontSize:11, color:'#aaa', margin:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.abonnement||'Aucun cours'}</p>
+                  </div>
                 </div>
-                <span style={{ fontSize:10, padding:'2px 8px', borderRadius:8, background:'rgba(255,0,153,0.1)', color:'#FF0099', flexShrink:0 }}>Actif</span>
+                <div style={{ display:'flex', alignItems:'center', gap:4, justifyContent:'center' }}>
+                  {taux !== null ? <>
+                    <div style={{ width:28, height:4, background:'#f0f0f0', borderRadius:2, overflow:'hidden', flexShrink:0 }}>
+                      <div style={{ width:`${taux}%`, height:'100%', background:tauxColor, borderRadius:2 }}/>
+                    </div>
+                    <span style={{ fontSize:12, fontWeight:500, color:tauxColor }}>{taux}%</span>
+                  </> : <span style={{ fontSize:11, color:'#ddd' }}>—</span>}
+                </div>
+                <div style={{ textAlign:'center' }}>
+                  {solde > 0
+                    ? <span style={{ fontSize:12, fontWeight:500, color: solde>3?'#E24B4A':'#b45309', background: solde>3?'#fef2f2':'#fff8e6', padding:'2px 7px', borderRadius:6 }}>{solde}</span>
+                    : <span style={{ fontSize:11, color:'#ddd' }}>—</span>}
+                </div>
               </div>
             )
           })}
