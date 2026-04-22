@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 const COULEURS = ['#FF0099','#8B4DB8','#1D9E75','#BA7517','#D85A30','#378ADD','#E24B4A','#0F6E56']
@@ -351,13 +352,15 @@ function FicheMembre({ membre, tousLesCours, onClose, onEdit, onArchiver }) {
 
 // ─── COMPOSANT PRINCIPAL ────────────────────────────────────────
 export default function Membres() {
+  const location = useLocation()
+  const membreIdFromNav = location.state?.membreId
   const [membres, setMembres] = useState([])
   const [tousLesCours, setTousLesCours] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [vue, setVue] = useState('liste') // 'liste' | 'fiche'
+  const [vue, setVue] = useState('liste')
   const [selected, setSelected] = useState(null)
-  const [modal, setModal] = useState(null) // null | 'nouveau' | {membre à éditer}
+  const [modal, setModal] = useState(null)
   const [toast, setToast] = useState(null)
 
   const MEMBRES_CACHE = 'happycath_membres_cache'
@@ -405,6 +408,14 @@ export default function Membres() {
       .subscribe()
     return () => supabase.removeChannel(sub)
   }, [loadData])
+
+  // Ouvrir directement la fiche si on vient du dashboard
+  useEffect(() => {
+    if (membreIdFromNav && membres.length > 0) {
+      const m = membres.find(x => x.id === membreIdFromNav)
+      if (m) { setSelected(m); setVue('fiche') }
+    }
+  }, [membreIdFromNav, membres])
 
   async function archiver(membre) {
     if (!window.confirm(`Archiver ${membre.nom} ?`)) return

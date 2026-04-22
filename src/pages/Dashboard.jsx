@@ -140,12 +140,13 @@ export default function Dashboard() {
       })
 
       const taux = totalPossible > 0 ? Math.round(totalSuivis / totalPossible * 100) : null
+      const tauxGlobal = totalPossible > 0 ? Math.round((totalSuivis + totalRattrapages) / totalPossible * 100) : null
       const solde = Math.max(0, totalManques - totalRattrapages)
       const dernierCours = (historique||[]).find(h => (h.presents||[]).includes(m.id) || (h.guests||[]).some(g=>g.membreId===m.id))
       const joursAbsent = dernierCours ? Math.floor((Date.now() - new Date(dernierCours.date+'T12:00:00').getTime()) / 86400000) : 999
       const abo = (abonnements||[]).find(a=>a.membre_id===m.id&&a.statut==='actif')
 
-      return { ...m, taux, solde, totalSuivis, totalManques, totalRattrapages, joursAbsent, abo, courIds }
+      return { ...m, taux, tauxGlobal, solde, totalSuivis, totalManques, totalRattrapages, joursAbsent, abo, courIds }
     })
 
     const tauxMoyen = statsMembres.filter(m=>m.taux!==null).reduce((s,m)=>s+m.taux,0) / Math.max(1, statsMembres.filter(m=>m.taux!==null).length)
@@ -312,29 +313,45 @@ export default function Dashboard() {
         </div>
 
         {/* Header tableau */}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 100px 80px 70px', gap:8, padding:'6px 0', borderBottom:'0.5px solid #f0f0f0', fontSize:11 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 90px 80px 80px 70px', gap:8, padding:'6px 0', borderBottom:'0.5px solid #f0f0f0', fontSize:11 }}>
           <ColHeader label="Membre" col="nom" sortCol={membresSort.col} sortDir={membresSort.dir} onSort={col=>toggleSort(membresSort,col,setMembresSort)} />
           <ColHeader label="Abonnement" col="abonnement" sortCol={membresSort.col} sortDir={membresSort.dir} onSort={col=>toggleSort(membresSort,col,setMembresSort)} center />
-          <ColHeader label="Assiduité" col="taux" sortCol={membresSort.col} sortDir={membresSort.dir} onSort={col=>toggleSort(membresSort,col,setMembresSort)} center />
+          <ColHeader label="Par cours" col="taux" sortCol={membresSort.col} sortDir={membresSort.dir} onSort={col=>toggleSort(membresSort,col,setMembresSort)} center />
+          <ColHeader label="Globale" col="tauxGlobal" sortCol={membresSort.col} sortDir={membresSort.dir} onSort={col=>toggleSort(membresSort,col,setMembresSort)} center />
           <ColHeader label="Rattrap." col="solde" sortCol={membresSort.col} sortDir={membresSort.dir} onSort={col=>toggleSort(membresSort,col,setMembresSort)} center />
         </div>
 
         {membresFiltres.map(m => {
           const c = m.taux !== null ? couleurTaux(m.taux) : '#ccc'
-          const aboLabel = m.abo ? m.abo.type : (m.abonnement||'').split('·')[0].trim().substring(0,12)||'—'
+          // Assiduité globale = (cours suivis + rattrapages) / (cours suivis + cours manqués)
+          const total = m.totalSuivis + m.totalManques
+          const tauxGlobal = total > 0 ? Math.round((m.totalSuivis + m.totalRattrapages) / total * 100) : null
+          const cg = tauxGlobal !== null ? couleurTaux(tauxGlobal) : '#ccc'
+          const aboLabel = m.abo ? m.abo.type : (m.abonnement||'').split('·')[0].trim().substring(0,10)||'—'
           return (
-            <div key={m.id} onClick={() => navigate('/membres')}
-              style={{ display:'grid', gridTemplateColumns:'1fr 100px 80px 70px', gap:8, padding:'8px 0', borderTop:'0.5px solid #f8f8f8', cursor:'pointer', alignItems:'center' }}
+            <div key={m.id}
+              onClick={() => navigate('/membres', { state: { membreId: m.id } })}
+              style={{ display:'grid', gridTemplateColumns:'1fr 90px 80px 80px 70px', gap:8, padding:'8px 0', borderTop:'0.5px solid #f8f8f8', cursor:'pointer', alignItems:'center' }}
               onMouseEnter={e=>e.currentTarget.style.background='#fafafa'}
               onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
               <span style={{ fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.nom}</span>
               <span style={{ fontSize:11, color:'#888', textAlign:'center', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{aboLabel}</span>
+              {/* Assiduité par cours */}
               <div style={{ display:'flex', alignItems:'center', gap:4, justifyContent:'center' }}>
                 {m.taux !== null ? <>
-                  <div style={{ width:28, height:4, background:'#f0f0f0', borderRadius:2, overflow:'hidden', flexShrink:0 }}>
+                  <div style={{ width:24, height:4, background:'#f0f0f0', borderRadius:2, overflow:'hidden', flexShrink:0 }}>
                     <div style={{ width:`${m.taux}%`, height:'100%', background:c, borderRadius:2 }}/>
                   </div>
                   <span style={{ fontSize:12, fontWeight:500, color:c }}>{m.taux}%</span>
+                </> : <span style={{ fontSize:11, color:'#ddd' }}>—</span>}
+              </div>
+              {/* Assiduité globale */}
+              <div style={{ display:'flex', alignItems:'center', gap:4, justifyContent:'center' }}>
+                {tauxGlobal !== null ? <>
+                  <div style={{ width:24, height:4, background:'#f0f0f0', borderRadius:2, overflow:'hidden', flexShrink:0 }}>
+                    <div style={{ width:`${tauxGlobal}%`, height:'100%', background:cg, borderRadius:2 }}/>
+                  </div>
+                  <span style={{ fontSize:12, fontWeight:500, color:cg }}>{tauxGlobal}%</span>
                 </> : <span style={{ fontSize:11, color:'#ddd' }}>—</span>}
               </div>
               <div style={{ textAlign:'center' }}>
