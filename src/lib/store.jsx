@@ -210,8 +210,8 @@ export function DataProvider({ children }) {
   // ─── ACTIONS MÉTIER ──────────────────────────────────────────
 
   async function sauvegarderAppel(payload) {
-    const { id, cours_id, cours_nom, date, presents, guests } = payload
-    const histo = { id, cours_id, cours_nom, date, presents, guests }
+    const { id, cours_id, cours_nom, date, presents, absents, guests } = payload
+    const histo = { id, cours_id, cours_nom, date, presents, absents: absents || [], guests }
 
     return upsert('historique', histo, () => {
       setHistorique(prev => {
