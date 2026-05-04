@@ -146,7 +146,27 @@ function EcranAppel({ cours, onValider, onAnnuler, appelExistant }) {
   const today = new Date().toISOString().split('T')[0]
   const [date, setDate] = useState(appelExistant?.date || today)
   const inscrits = inscritsDuCours(cours.id)
-  const [presents, setPresents] = useState(new Set(appelExistant?.presents || []))
+  // 3 états : null = non renseigné, true = présent, false = absent
+  function initStatuts() {
+    const s = {}
+    if (appelExistant) {
+      // Recharger depuis un appel existant
+      // Les absents sont ceux dans la liste inscrits mais pas dans presents
+      const presentsSet = new Set(appelExistant.presents || [])
+      inscrits.forEach(m => { s[m.id] = presentsSet.has(m.id) ? true : false })
+    }
+    return s
+  }
+  const [statuts, setStatuts] = useState(initStatuts)
+
+  function cycleStatut(id) {
+    setStatuts(prev => {
+      const actuel = prev[id] // undefined/null → présent → absent → null
+      if (actuel === undefined || actuel === null) return { ...prev, [id]: true }
+      if (actuel === true) return { ...prev, [id]: false }
+      return { ...prev, [id]: null }
+    })
+  }
   const [showRattrapage, setShowRattrapage] = useState(false)
   const [showEssai, setShowEssai] = useState(false)
   const [searchRattrapage, setSearchRattrapage] = useState('')
@@ -161,7 +181,7 @@ function EcranAppel({ cours, onValider, onAnnuler, appelExistant }) {
   function addRattrapage(m) {
     if (rattrapages.find(r=>r.id===m.id)) return
     setRattrapages(prev=>[...prev,m].sort((a,b)=>a.nom.localeCompare(b.nom)))
-    setPresents(prev=>new Set([...prev,m.id]))
+    setStatuts(prev=>({...prev,[m.id]:true}))
     setShowRattrapage(false); setSearchRattrapage('')
   }
 
@@ -183,14 +203,21 @@ function EcranAppel({ cours, onValider, onAnnuler, appelExistant }) {
 
   async function sauvegarder(idExistant) {
     const hId = idExistant || ('h'+Date.now().toString(36))
-    const guests = [...rattrapages.map(r=>({nom:r.nom,membreId:r.id,type:'rattrapage'})),...essais.map(e=>({nom:e.nom,membreId:null,type:'essai'}))]
-    await onValider({ id:hId, coursId:cours.id, coursNom:cours.nom, date, presents:[...presents], guests })
+    const presentsIds = Object.entries(statuts).filter(([,v])=>v===true).map(([k])=>k)
+    const absentsIds = Object.entries(statuts).filter(([,v])=>v===false).map(([k])=>k)
+    const guests = [
+      ...rattrapages.map(r=>({nom:r.nom,membreId:r.id,type:'rattrapage'})),
+      ...essais.map(e=>({nom:e.nom,membreId:null,type:'essai'}))
+    ]
+    await onValider({ id:hId, coursId:cours.id, coursNom:cours.nom, date, presents:presentsIds, absents:absentsIds, guests })
   }
 
   const inscritIds = new Set(inscrits.map(m=>m.id))
   const rattrapageIds = new Set(rattrapages.map(r=>r.id))
   const membresDispo = membres.filter(m=>!inscritIds.has(m.id)&&!rattrapageIds.has(m.id)&&m.nom.toLowerCase().includes(searchRattrapage.toLowerCase()))
-  const nbPresents = presents.size + essais.length
+  const nbPresents = Object.values(statuts).filter(v=>v===true).length + essais.length
+  const nbAbsents = Object.values(statuts).filter(v=>v===false).length
+  const nbNonRenseignes = inscrits.filter(m=>statuts[m.id]===undefined||statuts[m.id]===null).length
   const nbTotal = inscrits.length + rattrapages.length + essais.length
 
   return (
@@ -203,7 +230,10 @@ function EcranAppel({ cours, onValider, onAnnuler, appelExistant }) {
         </div>
         <div style={{ textAlign:'right' }}>
           <div style={{ fontSize:24, fontWeight:500, color:'#FF0099' }}>{nbPresents}<span style={{ fontSize:14, color:'#aaa', fontWeight:400 }}>/{nbTotal}</span></div>
-          <div style={{ fontSize:11, color:'#aaa' }}>présents</div>
+          <div style={{ fontSize:11, color:'#aaa' }}>
+            {nbAbsents > 0 && <span style={{ color:'#E24B4A', marginRight:6 }}>{nbAbsents} absent{nbAbsents>1?'s':''}</span>}
+            {nbNonRenseignes > 0 && <span style={{ color:'#bbb' }}>{nbNonRenseignes} non renseigné{nbNonRenseignes>1?'s':''}</span>}
+          </div>
         </div>
       </div>
 
@@ -223,19 +253,32 @@ function EcranAppel({ cours, onValider, onAnnuler, appelExistant }) {
         </div>
       )}
 
-      <p style={{ fontSize:11, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Inscrits ({inscrits.length})</p>
+      <p style={{ fontSize:11, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:4 }}>Inscrits ({inscrits.length})</p>
+      <p style={{ fontSize:11, color:'#bbb', marginBottom:10 }}>Appuyer une fois = présent · deux fois = absent · trois fois = effacer</p>
       <div style={{ display:'flex', flexDirection:'column', gap:5, marginBottom:14 }}>
         {inscrits.length === 0 && <p style={{ fontSize:13, color:'#aaa', padding:'10px 0' }}>Aucun inscrit — gérez les inscriptions depuis le module Membres</p>}
         {inscrits.map(m => {
-          const est = presents.has(m.id)
+          const statut = statuts[m.id] // true=présent, false=absent, null/undefined=non renseigné
+          const estPresent = statut === true
+          const estAbsent = statut === false
+          const nonRenseigne = statut === undefined || statut === null
+
+          const bg = estPresent ? 'rgba(255,0,153,0.05)' : estAbsent ? 'rgba(226,75,74,0.04)' : '#fff'
+          const border = estPresent ? '#FF0099' : estAbsent ? '#E24B4A' : 'rgba(0,0,0,0.08)'
+          const avatarBg = estPresent ? '#FF0099' : estAbsent ? '#E24B4A' : '#f0f0f0'
+          const avatarColor = estPresent || estAbsent ? '#fff' : '#bbb'
+          const avatarContent = estPresent ? '✓' : estAbsent ? '✗' : initiales(m.nom)
+          const labelColor = estPresent ? '#FF0099' : estAbsent ? '#E24B4A' : '#ddd'
+          const label = estPresent ? 'Présent' : estAbsent ? 'Absent' : '—'
+
           return (
-            <div key={m.id} onClick={()=>togglePresent(m.id)}
-              style={{ background:est?'rgba(255,0,153,0.05)':'#fff', border:`1.5px solid ${est?'#FF0099':'rgba(0,0,0,0.08)'}`, borderRadius:12, padding:'11px 14px', display:'flex', alignItems:'center', gap:12, cursor:'pointer', userSelect:'none' }}>
-              <div style={{ width:38, height:38, borderRadius:'50%', background:est?'#FF0099':'#f0f0f0', color:est?'#fff':'#888', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:500, flexShrink:0 }}>
-                {est ? '✓' : initiales(m.nom)}
+            <div key={m.id} onClick={()=>cycleStatut(m.id)}
+              style={{ background:bg, border:`1.5px solid ${border}`, borderRadius:12, padding:'11px 14px', display:'flex', alignItems:'center', gap:12, cursor:'pointer', userSelect:'none', transition:'all .15s' }}>
+              <div style={{ width:38, height:38, borderRadius:'50%', background:avatarBg, color:avatarColor, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:500, flexShrink:0, transition:'all .15s' }}>
+                {avatarContent}
               </div>
-              <span style={{ flex:1, fontSize:14, fontWeight:est?500:400 }}>{m.nom}</span>
-              <span style={{ fontSize:12, fontWeight:500, color:est?'#FF0099':'#ccc' }}>{est?'Présent':'Absent'}</span>
+              <span style={{ flex:1, fontSize:14, fontWeight:estPresent?500:400 }}>{m.nom}</span>
+              <span style={{ fontSize:12, fontWeight:500, color:labelColor }}>{label}</span>
             </div>
           )
         })}
@@ -249,7 +292,7 @@ function EcranAppel({ cours, onValider, onAnnuler, appelExistant }) {
               <div style={{ width:38, height:38, borderRadius:'50%', background:'#aad000', color:'#3a5000', display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, fontWeight:500, flexShrink:0 }}>✓</div>
               <span style={{ flex:1, fontSize:14, fontWeight:500 }}>{m.nom}</span>
               <span style={{ fontSize:11, padding:'2px 8px', borderRadius:6, background:'rgba(204,255,0,0.2)', color:'#3a5000' }}>Rattrapage</span>
-              <button onClick={()=>{setRattrapages(prev=>prev.filter(r=>r.id!==m.id));setPresents(prev=>{const n=new Set(prev);n.delete(m.id);return n})}} style={{ background:'none', border:'none', cursor:'pointer', color:'#aaa', fontSize:20, lineHeight:1 }}>✕</button>
+              <button onClick={()=>{setRattrapages(prev=>prev.filter(r=>r.id!==m.id));setStatuts(prev=>({...prev,[m.id]:null}))}} style={{ background:'none', border:'none', cursor:'pointer', color:'#aaa', fontSize:20, lineHeight:1 }}>✕</button>
             </div>
           ))}
         </div>
@@ -299,7 +342,7 @@ function EcranAppel({ cours, onValider, onAnnuler, appelExistant }) {
       )}
 
       <button onClick={handleValider} disabled={saving} style={{ ...BTN.primary, width:'100%', padding:14, fontSize:16, borderRadius:12, marginBottom:8, opacity:saving?0.7:1 }}>
-        {saving ? 'Enregistrement…' : `✓ Valider l'appel — ${nbPresents} présent${nbPresents>1?'s':''}`}
+        {saving ? 'Enregistrement…' : `✓ Valider — ${nbPresents} présent${nbPresents>1?'s':''}${nbAbsents>0?` · ${nbAbsents} absent${nbAbsents>1?'s':''}`:''}`}
       </button>
       <button onClick={onAnnuler} style={{ ...BTN.ghost, width:'100%', padding:11, borderRadius:12 }}>Annuler</button>
     </div>
@@ -397,9 +440,10 @@ export default function Cours() {
     setVue('appel')
   }
 
-  async function validerAppel({ id, coursId, coursNom, date, presents, guests }) {
-    await sauvegarderAppel({ id, cours_id:coursId, cours_nom:coursNom, date, presents, guests })
-    showToast(`Appel enregistré — ${presents.length + guests.length} présent(s)`)
+  async function validerAppel({ id, coursId, coursNom, date, presents, absents, guests }) {
+    await sauvegarderAppel({ id, cours_id:coursId, cours_nom:coursNom, date, presents, absents: absents||[], guests })
+    const nbPresents = presents.length + guests.length
+    showToast(`Appel enregistré — ${nbPresents} présent(s)${absents?.length?` · ${absents.length} absent(s)`:''}`)
     setVue('planning'); setCoursSelectionne(null); setAppelExistant(null)
   }
 
