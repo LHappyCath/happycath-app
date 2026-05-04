@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useData } from '../lib/store'
-import { supabase } from '../lib/supabase'
 
 const JOURS = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam']
 
@@ -63,20 +62,15 @@ export default function Dashboard() {
   const CACHE_KEY = 'happycath_dashboard_cache'
 
   const loadDashboard = useCallback(async () => {
-    // Utiliser les données du store global — toujours à jour
     const membres = storeM, cours = storeC, inscriptions = storeI, historique = storeH, abonnements = storeA
     if (!membres.length && !cours.length) {
-      // Fallback cache si store vide
       try {
         const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null')
         if (cached) { setData(cached); setLoading(false); return }
       } catch(e) {}
       setLoading(false); return
     }
-      { data: abonnements }
-    ] = await Promise.all([
-      supabase.from('membres').select('*').eq('actif', true).order('nom'),
-      supabase.from('cours').select('*').eq('actif', true).order('jour').order('heure'),
+
     // Stats par cours
     const statsCours = (cours || []).map(c => {
       const inscrits = (inscriptions || []).filter(i => i.cours_id === c.id)
