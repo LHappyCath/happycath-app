@@ -150,10 +150,13 @@ function EcranAppel({ cours, onValider, onAnnuler, appelExistant }) {
   function initStatuts() {
     const s = {}
     if (appelExistant) {
-      // Recharger depuis un appel existant
-      // Les absents sont ceux dans la liste inscrits mais pas dans presents
       const presentsSet = new Set(appelExistant.presents || [])
-      inscrits.forEach(m => { s[m.id] = presentsSet.has(m.id) ? true : false })
+      const absentsSet = new Set(appelExistant.absents || [])
+      inscrits.forEach(m => {
+        if (presentsSet.has(m.id)) s[m.id] = true       // présent explicite
+        else if (absentsSet.has(m.id)) s[m.id] = false  // absent explicite
+        // sinon : non renseigné (undefined = null)
+      })
     }
     return s
   }
