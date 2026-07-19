@@ -5,10 +5,11 @@ const NAV_ITEMS = [
   { to: '/',           icon: '🏠', label: 'Accueil',         section: null },
   { to: '/dashboard',  icon: '📈', label: 'Tableau de bord', section: null },
   { to: '/cours',      icon: '📋', label: 'Cours & appel',   section: 'Terrain' },
-  { to: '/membres',    icon: '👥', label: 'Membres',         section: null },
-  { to: '/reglements', icon: '💶', label: 'Règlements',      section: 'Gestion' },
-  { to: '/budget',     icon: '📊', label: 'Budget',          section: null },
-  { to: '/factures',   icon: '🧾', label: 'Factures',        section: null },
+  { to: '/membres',      icon: '👥', label: 'Membres',         section: null },
+  { to: '/inscriptions', icon: '📥', label: 'Inscriptions',    section: 'Gestion' },
+  { to: '/reglements',   icon: '💶', label: 'Règlements',      section: null },
+  { to: '/budget',       icon: '📊', label: 'Budget',          section: null },
+  { to: '/factures',     icon: '🧾', label: 'Factures',        section: null },
 ]
 
 const BOTTOM_NAV = [
