@@ -27,6 +27,32 @@ function Modal({ titre, onClose, children, wide }) {
 function fmtEuros(n) { return Number(n||0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €' }
 function fmtDate(d) { return d ? new Date(d + 'T12:00:00').toLocaleDateString('fr-FR', { day:'numeric', month:'short', year:'numeric' }) : '—' }
 
+// ─── LISTE DÉROULANTE DE BANQUES (extensible) ──────────────────────
+function SelectBanque({ valeur, onChange }) {
+  const { banquesConnues, ajouterBanque } = useData()
+
+  function handleChange(e) {
+    const v = e.target.value
+    if (v === '__ajouter__') {
+      const nom = window.prompt('Nom de la nouvelle banque :')
+      if (nom && nom.trim()) {
+        ajouterBanque(nom.trim())
+        onChange(nom.trim())
+      }
+      return
+    }
+    onChange(v)
+  }
+
+  return (
+    <select style={INPUT} value={valeur || ''} onChange={handleChange}>
+      <option value="">— Choisir une banque —</option>
+      {banquesConnues.map(b => <option key={b} value={b}>{b}</option>)}
+      <option value="__ajouter__">+ Ajouter une nouvelle banque…</option>
+    </select>
+  )
+}
+
 // ─── FORMULAIRE : SAISIE GROUPÉE DE CHÈQUES ────────────────────────
 function FormChequesGroupes({ onClose }) {
   const { membres, cours, creerReglementsPersonnalises } = useData()
@@ -100,7 +126,7 @@ function FormChequesGroupes({ onClose }) {
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <div>
               <label style={LABEL}>Banque</label>
-              <input style={INPUT} value={form.banque} onChange={e=>set('banque', e.target.value)} placeholder="Ex : Crédit Agricole" />
+              <SelectBanque valeur={form.banque} onChange={v=>set('banque', v)} />
             </div>
             <div>
               <label style={LABEL}>Périodicité</label>
@@ -310,6 +336,57 @@ function fmtMoisAnnee(dateStr) {
   return new Date(dateStr+'T12:00:00').toLocaleDateString('fr-FR', { month:'long', year:'numeric' })
 }
 
+// Répartit les chèques d'un mois en remises. Règle unique : une banque n'est JAMAIS re-découpée
+// une fois qu'un morceau est formé (on ne scinde une banque que si elle dépasse le max à elle seule,
+// en morceaux de taille max). En revanche, ces morceaux (petites banques entières ou restes de grosses
+// banques) peuvent librement se mélanger entre eux pour remplir une remise au mieux.
+function repartirMois(mois, chequesMois, maxParRemise, remiseExistante) {
+  const parBanque = {}
+  for (const c of chequesMois) {
+    const b = c.banque || 'Banque non renseignée'
+    if (!parBanque[b]) parBanque[b] = []
+    parBanque[b].push(c)
+  }
+  const groupes = Object.entries(parBanque)
+    .map(([banque, cheques]) => ({ banque, cheques: [...cheques].sort((a,b) => (a.payeur||'').localeCompare(b.payeur||'')) }))
+    .sort((a,b) => a.banque.localeCompare(b.banque))
+
+  // Découpe uniquement les banques qui dépassent le max, en morceaux atomiques <= max
+  const morceaux = []
+  for (const g of groupes) {
+    if (g.cheques.length > maxParRemise) {
+      for (let i = 0; i < g.cheques.length; i += maxParRemise) morceaux.push(g.cheques.slice(i, i + maxParRemise))
+    } else {
+      morceaux.push(g.cheques)
+    }
+  }
+
+  // Remplissage "first fit" : chaque morceau va dans le premier emplacement où il tient,
+  // en commençant par la remise déjà préparée (capacité limitée), sinon une nouvelle remise.
+  const bins = []
+  if (remiseExistante) {
+    bins.push({ existant: remiseExistante, cheques: [], capacite: Math.max(0, maxParRemise - remiseExistante.nb_reglements) })
+  }
+  for (const morceau of morceaux) {
+    let placee = false
+    for (const bin of bins) {
+      if (bin.cheques.length + morceau.length <= bin.capacite) {
+        bin.cheques.push(...morceau)
+        placee = true
+        break
+      }
+    }
+    if (!placee) bins.push({ existant: null, cheques: [...morceau], capacite: maxParRemise })
+  }
+
+  return bins.filter(b => b.cheques.length > 0).map(b => {
+    const banques = [...new Set(b.cheques.map(c => c.banque || 'Banque non renseignée'))]
+    return b.existant
+      ? { mode:'ajout', numero: b.existant.numero, mois, banque: banques.join(', '), cheques: b.cheques }
+      : { mode:'creation', banque: banques.join(', '), mois, dateRemise: mois+'-01', cheques: b.cheques }
+  })
+}
+
 function FormPreparerRemise({ onClose }) {
   const { reglements, membres, remises, creerRemises, ajouterChequesRemise } = useData()
   const [maxParRemise, setMaxParRemise] = useState(25)
@@ -322,35 +399,22 @@ function FormPreparerRemise({ onClose }) {
     return reglements.filter(r => r.mode === 'Chèque' && r.endosse && !r.numero_remise && r.date_encaissement)
   }, [reglements])
 
-  // Groupe par banque + mois d'encaissement. Si une remise "préparée" (pas encore déposée) existe déjà
-  // pour ce couple banque/mois, on complète celle-ci en priorité au lieu d'en créer une nouvelle à côté.
+  // Regroupe uniquement par MOIS d'encaissement (le max de 20-25 s'applique toutes banques confondues).
+  // À l'intérieur d'une même remise, les chèques restent triés par banque (en blocs) puis par payeur,
+  // pour que la préparation physique (piles par banque, triées alphabétiquement) reste facile.
   const lots = useMemo(() => {
-    const parGroupe = {}
+    const parMois = {}
     for (const c of chequesEligibles) {
       const mois = c.date_encaissement.slice(0, 7) // 'YYYY-MM'
-      const banque = c.banque || '— Banque non renseignée —'
-      const cle = `${banque}||${mois}`
-      if (!parGroupe[cle]) parGroupe[cle] = { banque, mois, cheques: [] }
-      parGroupe[cle].cheques.push(c)
+      if (!parMois[mois]) parMois[mois] = []
+      parMois[mois].push(c)
     }
     const resultat = []
-    for (const g of Object.values(parGroupe)) {
-      const tries = [...g.cheques].sort((a,b) => (a.payeur||'').localeCompare(b.payeur||''))
-      const remiseExistante = remises.find(r => r.banque === g.banque && r.date_remise?.slice(0,7) === g.mois && r.statut === 'prepare')
-      let reste = tries
-      if (remiseExistante) {
-        const placesRestantes = Math.max(0, maxParRemise - remiseExistante.nb_reglements)
-        const ajout = tries.slice(0, placesRestantes)
-        reste = tries.slice(placesRestantes)
-        if (ajout.length) {
-          resultat.push({ mode:'ajout', numero: remiseExistante.numero, banque: g.banque, mois: g.mois, cheques: ajout })
-        }
-      }
-      for (let i = 0; i < reste.length; i += maxParRemise) {
-        resultat.push({ mode:'creation', banque: g.banque, mois: g.mois, dateRemise: g.mois + '-01', cheques: reste.slice(i, i + maxParRemise) })
-      }
+    for (const [mois, cheques] of Object.entries(parMois)) {
+      const remiseExistante = remises.find(r => r.date_remise?.slice(0,7) === mois && r.statut === 'prepare')
+      resultat.push(...repartirMois(mois, cheques, maxParRemise, remiseExistante))
     }
-    return resultat.sort((a,b) => a.mois.localeCompare(b.mois) || a.banque.localeCompare(b.banque))
+    return resultat.sort((a,b) => a.mois.localeCompare(b.mois))
   }, [chequesEligibles, maxParRemise, remises])
 
   async function valider() {
@@ -408,7 +472,7 @@ function FormPreparerRemise({ onClose }) {
                   <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
                     {lot.cheques.map(c => (
                       <div key={c.id} style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#888', padding:'2px 0' }}>
-                        <span>{c.payeur || membreNomDe(c.membre_id)} — n°{c.numero_cheque}</span>
+                        <span>{c.payeur || membreNomDe(c.membre_id)} — {c.banque || '?'} n°{c.numero_cheque}</span>
                         <span>{fmtEuros(c.montant)}</span>
                       </div>
                     ))}
@@ -446,7 +510,11 @@ function VueRemises() {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
       {remises.map(r => {
-        const cheques = reglements.filter(c => c.numero_remise === r.numero)
+        const cheques = reglements.filter(c => c.numero_remise === r.numero).sort((a,b) => {
+          const banqueA = a.banque || '', banqueB = b.banque || ''
+          if (banqueA !== banqueB) return banqueA.localeCompare(banqueB)
+          return (a.payeur||'').localeCompare(b.payeur||'')
+        })
         const st = STATUTS[r.statut] || STATUTS.prepare
         const ouvert = ouverte === r.numero
         return (
@@ -474,7 +542,7 @@ function VueRemises() {
               <div style={{ marginTop:12, paddingTop:12, borderTop:'0.5px solid rgba(0,0,0,0.06)', display:'flex', flexDirection:'column', gap:4 }}>
                 {cheques.map(c => (
                   <div key={c.id} style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#666' }}>
-                    <span>{c.payeur || membreNomDe(c.membre_id)} — n°{c.numero_cheque}</span>
+                    <span>{c.payeur || membreNomDe(c.membre_id)} — {c.banque || '?'} n°{c.numero_cheque}</span>
                     <span>{fmtEuros(c.montant)}</span>
                   </div>
                 ))}
