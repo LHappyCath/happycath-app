@@ -503,17 +503,19 @@ export default function Membres() {
   const { membres, online, archiverMembre } = useData()
   const [search, setSearch] = useState('')
   const [vue, setVue] = useState('liste')
-  const [selected, setSelected] = useState(null)
+  const [selectedId, setSelectedId] = useState(null)
   const [modal, setModal] = useState(null)
   const [toast, setToast] = useState(null)
   const [voirArchives, setVoirArchives] = useState(false)
   const [showImportRoster, setShowImportRoster] = useState(false)
 
+  const selected = membres.find(m => m.id === selectedId) || null
+
   // Ouvrir directement une fiche depuis le dashboard
   useEffect(() => {
     if (membreIdFromNav && membres.length > 0) {
       const m = membres.find(x=>x.id===membreIdFromNav)
-      if (m) { setSelected(m); setVue('fiche') }
+      if (m) { setSelectedId(m.id); setVue('fiche') }
     }
   }, [membreIdFromNav, membres])
 
@@ -522,7 +524,7 @@ export default function Membres() {
     if (!window.confirm(`Archiver ${membre.nom} ?`)) return
     await archiverMembre(membre.id)
     showToast('Membre archivé')
-    setVue('liste'); setSelected(null)
+    setVue('liste'); setSelectedId(null)
   }
 
   function showToast(msg) { setToast(msg); setTimeout(()=>setToast(null), 3000) }
@@ -540,7 +542,7 @@ export default function Membres() {
     return (
       <div>
         <FicheMembre membre={selected}
-          onClose={()=>{setVue('liste');setSelected(null)}}
+          onClose={()=>{setVue('liste');setSelectedId(null)}}
           onEdit={()=>setModal(selected)}
           onArchiver={()=>archiver(selected)} />
         {modal && (
@@ -602,7 +604,7 @@ export default function Membres() {
           } catch(e){}
           const tauxColor = taux!==null?(taux>=80?'#0f6e56':taux>=60?'#BA7517':'#E24B4A'):'#ccc'
           return (
-            <div key={m.id} onClick={()=>{setSelected(m);setVue('fiche')}}
+            <div key={m.id} onClick={()=>{setSelectedId(m.id);setVue('fiche')}}
               style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:12, padding:'10px 14px', display:'grid', gridTemplateColumns:'1fr 80px 60px', gap:8, alignItems:'center', cursor:'pointer', transition:'border-color .15s' }}
               onMouseEnter={e=>e.currentTarget.style.borderColor='#FF0099'}
               onMouseLeave={e=>e.currentTarget.style.borderColor='rgba(0,0,0,0.08)'}>
