@@ -76,7 +76,7 @@ function FormMembre({ initial, onSave, onClose }) {
     onSave()
   }
 
-  const coursByJour = JOURS_FULL.map((j,i)=>({jour:j,idx:i,cours:cours.filter(c=>c.jour===i)})).filter(g=>g.cours.length>0)
+  const coursByJour = JOURS_FULL.map((j,i)=>({jour:j,idx:i,cours:cours.filter(c=>c.jour===i && c.actif!==false)})).filter(g=>g.cours.length>0)
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
@@ -145,7 +145,7 @@ function FormMembre({ initial, onSave, onClose }) {
 
 // ─── FICHE MEMBRE ───────────────────────────────────────────────
 function FicheMembre({ membre, onClose, onEdit, onArchiver }) {
-  const { cours, inscriptions, historique, online } = useData()
+  const { cours, inscriptions, historique, online, reactiverMembre } = useData()
   const [stats, setStats] = useState(null)
   const [sessions, setSessions] = useState([])
 
@@ -193,12 +193,20 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver }) {
         <button onClick={onClose} style={{ ...BTN.ghost, padding:'8px 14px', fontSize:18 }}>←</button>
         <div style={{ width:52, height:52, borderRadius:'50%', background:coul+'20', color:coul, display:'flex', alignItems:'center', justifyContent:'center', fontSize:18, fontWeight:500, flexShrink:0 }}>{initiales(membre.nom)}</div>
         <div style={{ flex:1 }}>
-          <h2 style={{ fontSize:18, fontWeight:500, margin:'0 0 2px' }}>{membre.nom}</h2>
+          <h2 style={{ fontSize:18, fontWeight:500, margin:'0 0 2px' }}>
+            {membre.nom}
+            {membre.actif === false && (
+              <span style={{ marginLeft:8, fontSize:11, fontWeight:500, color:'#888', background:'#eee', borderRadius:12, padding:'2px 8px', verticalAlign:'middle' }}>Archivé</span>
+            )}
+          </h2>
           <p style={{ fontSize:13, color:'#888', margin:0 }}>{membre.abonnement||'Pas de cours'}</p>
         </div>
         <div style={{ display:'flex', gap:6 }}>
           <button onClick={onEdit} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px' }}>Modifier</button>
-          {online && <button onClick={onArchiver} style={{ background:'none', border:'none', cursor:'pointer', color:'#ddd', fontSize:16, padding:'6px 8px' }}>🗑</button>}
+          {online && membre.actif === false && (
+            <button onClick={()=>reactiverMembre(membre.id)} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px', color:'#1D9E75' }}>Réactiver</button>
+          )}
+          {online && membre.actif !== false && <button onClick={onArchiver} style={{ background:'none', border:'none', cursor:'pointer', color:'#ddd', fontSize:16, padding:'6px 8px' }}>🗑</button>}
         </div>
       </div>
 
@@ -293,6 +301,7 @@ export default function Membres() {
   const [selected, setSelected] = useState(null)
   const [modal, setModal] = useState(null)
   const [toast, setToast] = useState(null)
+  const [voirArchives, setVoirArchives] = useState(false)
 
   // Ouvrir directement une fiche depuis le dashboard
   useEffect(() => {
@@ -312,7 +321,11 @@ export default function Membres() {
 
   function showToast(msg) { setToast(msg); setTimeout(()=>setToast(null), 3000) }
 
-  const filtered = membres.filter(m => {
+  const membresActifs = membres.filter(m => m.actif !== false)
+  const membresArchives = membres.filter(m => m.actif === false)
+  const base = voirArchives ? membresArchives : membresActifs
+
+  const filtered = base.filter(m => {
     const s = search.toLowerCase()
     return !s || m.nom.toLowerCase().includes(s) || (m.abonnement||'').toLowerCase().includes(s)
   })
@@ -344,9 +357,22 @@ export default function Membres() {
       </div>
 
       <div className="stats-grid">
-        <div className="stat-card"><div className="stat-val" style={{ color:'#FF0099' }}>{membres.length}</div><div className="stat-lbl">Membres actifs</div></div>
-        <div className="stat-card"><div className="stat-val">{membres.filter(m=>m.abonnement).length}</div><div className="stat-lbl">Avec abonnement</div></div>
+        <div className="stat-card"><div className="stat-val" style={{ color:'#FF0099' }}>{membresActifs.length}</div><div className="stat-lbl">Membres actifs</div></div>
+        <div className="stat-card"><div className="stat-val">{membresActifs.filter(m=>m.abonnement).length}</div><div className="stat-lbl">Avec abonnement</div></div>
         <div className="stat-card"><div className="stat-val" style={{ color: !online?'#888':'#1a1a1a' }}>{online?'En ligne':'Hors ligne'}</div><div className="stat-lbl">Statut réseau</div></div>
+      </div>
+
+      <div style={{ display:'flex', gap:8, marginBottom:14 }}>
+        <button
+          onClick={()=>setVoirArchives(false)}
+          style={{ ...BTN.ghost, ...(!voirArchives ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>
+          Actifs ({membresActifs.length})
+        </button>
+        <button
+          onClick={()=>setVoirArchives(true)}
+          style={{ ...BTN.ghost, ...(voirArchives ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>
+          Archivés ({membresArchives.length})
+        </button>
       </div>
 
       <input type="text" placeholder="Rechercher un membre…" value={search} onChange={e=>setSearch(e.target.value)}

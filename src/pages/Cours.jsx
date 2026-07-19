@@ -77,7 +77,7 @@ function FormCours({ initial, onSave, onClose }) {
 }
 
 // ─── PLANNING ───────────────────────────────────────────────────
-function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditCours, onDeleteCours, onNouveauCours, online }) {
+function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditCours, onDeleteCours, onReactiverCours, onNouveauCours, online, archiveMode, toggle }) {
   const aujourdJour = new Date().getDay()
   const [jourActif, setJourActif] = useState(aujourdJour)
   const coursDuJour = [...cours].filter(c=>c.jour===jourActif).sort((a,b)=>a.heure.localeCompare(b.heure))
@@ -86,8 +86,9 @@ function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditC
     <div>
       <div className="page-header">
         <h1 className="page-title">Cours & appel</h1>
-        <button style={BTN.primary} onClick={onNouveauCours}>+ Nouveau cours</button>
+        {!archiveMode && <button style={BTN.primary} onClick={onNouveauCours}>+ Nouveau cours</button>}
       </div>
+      {toggle}
       <div style={{ display:'flex', gap:6, marginBottom:20, overflowX:'auto', paddingBottom:2 }}>
         {JOURS.map((j,i) => {
           const hasCours = cours.some(c=>c.jour===i)
@@ -124,12 +125,15 @@ function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditC
                 <p style={{ fontSize:15, fontWeight:500, margin:'0 0 3px' }}>{c.nom}</p>
                 <p style={{ fontSize:12, color:'#888', margin:'0 0 10px' }}>{c.coach} · {nb} inscrit{nb!==1?'s':''} / {c.capacite_max||15} places</p>
                 <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                  <button onClick={()=>onStartAppel(c)} style={{ ...BTN.primary, fontSize:12, padding:'6px 14px' }}>
-                    {jourActif===aujourdJour ? "Faire l'appel" : 'Appel rétroactif'}
-                  </button>
+                  {!archiveMode && (
+                    <button onClick={()=>onStartAppel(c)} style={{ ...BTN.primary, fontSize:12, padding:'6px 14px' }}>
+                      {jourActif===aujourdJour ? "Faire l'appel" : 'Appel rétroactif'}
+                    </button>
+                  )}
                   <button onClick={()=>onVoirHistorique(c)} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px' }}>Historique</button>
-                  <button onClick={()=>onEditCours(c)} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px' }}>Modifier</button>
-                  {online && <button onClick={()=>onDeleteCours(c)} style={{ background:'none', border:'none', cursor:'pointer', fontSize:12, color:'#ccc', padding:'6px 8px' }}>Supprimer</button>}
+                  {!archiveMode && <button onClick={()=>onEditCours(c)} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px' }}>Modifier</button>}
+                  {online && !archiveMode && <button onClick={()=>onDeleteCours(c)} style={{ background:'none', border:'none', cursor:'pointer', fontSize:12, color:'#ccc', padding:'6px 8px' }}>Supprimer</button>}
+                  {online && archiveMode && <button onClick={()=>onReactiverCours(c)} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px', color:'#1D9E75' }}>Réactiver</button>}
                 </div>
               </div>
             </div>
@@ -420,12 +424,16 @@ function HistoriqueCours({ cours, onRetour, onEditer }) {
 // ─── COMPOSANT PRINCIPAL ────────────────────────────────────────
 export default function Cours() {
   const [searchParams] = useSearchParams()
-  const { cours, inscriptions, sauvegarderAppel, supprimerCours, online, historique } = useData()
+  const { cours, inscriptions, sauvegarderAppel, supprimerCours, reactiverCours, online, historique } = useData()
   const [vue, setVue] = useState('planning')
   const [coursSelectionne, setCoursSelectionne] = useState(null)
   const [appelExistant, setAppelExistant] = useState(null)
   const [modalCours, setModalCours] = useState(null)
   const [toast, setToast] = useState(null)
+  const [voirArchives, setVoirArchives] = useState(false)
+
+  const coursActifs = cours.filter(c => c.actif !== false)
+  const coursArchives = cours.filter(c => c.actif === false)
 
   useEffect(() => {
     const id = searchParams.get('appel')
@@ -452,9 +460,14 @@ export default function Cours() {
 
   async function handleSupprimerCours(c) {
     if (!online) { showToast('Suppression impossible hors ligne'); return }
-    if (!window.confirm(`Supprimer le cours "${c.nom}" ?`)) return
+    if (!window.confirm(`Archiver le cours "${c.nom}" ?`)) return
     await supprimerCours(c.id)
-    showToast('Cours supprimé')
+    showToast('Cours archivé')
+  }
+
+  async function handleReactiverCours(c) {
+    await reactiverCours(c.id)
+    showToast('Cours réactivé')
   }
 
   function showToast(msg) { setToast(msg); setTimeout(()=>setToast(null), 3000) }
@@ -462,12 +475,26 @@ export default function Cours() {
   return (
     <div>
       {vue === 'planning' && (
-        <Planning cours={cours} inscriptions={inscriptions} online={online}
+        <Planning cours={voirArchives ? coursArchives : coursActifs} inscriptions={inscriptions} online={online}
+          archiveMode={voirArchives}
           onStartAppel={startAppel}
           onVoirHistorique={c=>{setCoursSelectionne(c);setVue('historique')}}
           onEditCours={c=>setModalCours(c)}
           onDeleteCours={handleSupprimerCours}
-          onNouveauCours={()=>setModalCours('nouveau')} />
+          onReactiverCours={handleReactiverCours}
+          onNouveauCours={()=>setModalCours('nouveau')}
+          toggle={
+            <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+              <button onClick={()=>setVoirArchives(false)}
+                style={{ ...BTN.ghost, ...(!voirArchives ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>
+                Actifs ({coursActifs.length})
+              </button>
+              <button onClick={()=>setVoirArchives(true)}
+                style={{ ...BTN.ghost, ...(voirArchives ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>
+                Archivés ({coursArchives.length})
+              </button>
+            </div>
+          } />
       )}
       {vue === 'appel' && coursSelectionne && (
         <EcranAppel cours={coursSelectionne} appelExistant={appelExistant}
