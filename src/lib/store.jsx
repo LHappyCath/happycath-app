@@ -38,6 +38,7 @@ export function DataProvider({ children }) {
   const [abonnements, setAbonnements] = useState([])
   const [reglements, setReglements] = useState([])
   const [tarifs, setTarifs] = useState([])
+  const [remises, setRemises] = useState([])
   const [parametres, setParametres] = useState({})
   const [loading, setLoading] = useState(true)
   const [online, setOnline] = useState(navigator.onLine)
@@ -58,6 +59,7 @@ export function DataProvider({ children }) {
         setReglements(cached.reglements || [])
         setTarifs(cached.tarifs || [])
         setParametres(cached.parametres || {})
+        setRemises(cached.remises || [])
       }
       setLoading(false)
       return
@@ -65,7 +67,7 @@ export function DataProvider({ children }) {
 
     try {
       const [
-        { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }
+        { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }
       ] = await Promise.all([
         supabase.from('cours').select('*').order('jour').order('heure'),
         supabase.from('membres').select('*').order('nom'),
@@ -75,10 +77,11 @@ export function DataProvider({ children }) {
         supabase.from('reglements').select('*').order('date_encaissement', { ascending: false }),
         supabase.from('tarifs').select('*'),
         supabase.from('parametres').select('*'),
+        supabase.from('remises').select('*').order('numero', { ascending: false }),
       ])
 
       const paramsObj = Object.fromEntries((p||[]).map(x => [x.cle, x.valeur]))
-      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj }
+      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[] }
       setCours(data.cours)
       setMembres(data.membres)
       setInscriptions(data.inscriptions)
@@ -87,6 +90,7 @@ export function DataProvider({ children }) {
       setReglements(data.reglements)
       setTarifs(data.tarifs)
       setParametres(data.parametres)
+      setRemises(data.remises)
       saveCache(data)
     } catch(e) {
       console.error('loadAll error:', e)
@@ -101,6 +105,7 @@ export function DataProvider({ children }) {
         setReglements(cached.reglements || [])
         setTarifs(cached.tarifs || [])
         setParametres(cached.parametres || {})
+        setRemises(cached.remises || [])
       }
     }
     setLoading(false)
@@ -160,6 +165,7 @@ export function DataProvider({ children }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'abonnements' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reglements' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tarifs' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'remises' }, loadAll)
       .subscribe()
 
     return () => { if (realtimeSub.current) supabase.removeChannel(realtimeSub.current) }
@@ -603,13 +609,68 @@ export function DataProvider({ children }) {
     }
   }
 
+  // ─── REMISES DE CHÈQUES ──────────────────────────────────────
+  // Crée plusieurs remises d'un coup à partir de lots déjà préparés (groupés/triés côté écran)
+  // lots: [{ banque, cheques: [reglement, ...], dateRemise }]
+  async function creerRemises(lots) {
+    // Numérotation séquentielle par mois, en repartant du dernier numéro connu en base
+    const dateRef = lots[0]?.dateRemise ? new Date(lots[0].dateRemise+'T12:00:00') : new Date()
+    const prefixe = `CHQ-${dateRef.getFullYear()}-${String(dateRef.getMonth()+1).padStart(2,'0')}`
+    const existants = remises.filter(r => r.numero.startsWith(prefixe))
+    let compteur = existants.length
+
+    const nouvellesRemises = []
+    const patchesReglements = []
+
+    for (const lot of lots) {
+      compteur++
+      const numero = `${prefixe}-${String(compteur).padStart(2,'0')}`
+      const montantTotal = lot.cheques.reduce((s,c) => s + Number(c.montant||0), 0)
+      nouvellesRemises.push({
+        numero, type: 'CHQ', banque: lot.banque, date_remise: lot.dateRemise,
+        montant_total: montantTotal, nb_reglements: lot.cheques.length, statut: 'prepare',
+      })
+      for (const chq of lot.cheques) {
+        patchesReglements.push({ id: chq.id, numero_remise: numero })
+      }
+    }
+
+    try {
+      const { data: inserted, error } = await supabase.from('remises').insert(nouvellesRemises).select()
+      if (error) throw error
+      for (const p of patchesReglements) {
+        await supabase.from('reglements').update({ numero_remise: p.numero_remise }).eq('id', p.id)
+      }
+      setRemises(prev => [...(inserted||nouvellesRemises), ...prev])
+      setReglements(prev => prev.map(r => {
+        const p = patchesReglements.find(x => x.id === r.id)
+        return p ? { ...r, numero_remise: p.numero_remise } : r
+      }))
+      return { success: true, nb: nouvellesRemises.length }
+    } catch(e) {
+      return { error: e.message || 'Erreur lors de la création des remises' }
+    }
+  }
+
+  async function modifierStatutRemise(numero, statut) {
+    try {
+      const { error } = await supabase.from('remises').update({ statut }).eq('numero', numero)
+      if (error) throw error
+      setRemises(prev => prev.map(r => r.numero === numero ? { ...r, statut } : r))
+      return { success: true }
+    } catch(e) {
+      return { error: e.message }
+    }
+  }
+
   const value = {
     // Données
-    cours, membres, inscriptions, historique, abonnements, reglements, tarifs, parametres, saisonActive,
+    cours, membres, inscriptions, historique, abonnements, reglements, tarifs, parametres, saisonActive, remises,
     loading, online, syncing, queueSize,
     // Actions
     loadAll,
     definirSaisonActive,
+    creerRemises, modifierStatutRemise,
     sauvegarderAppel,
     sauvegarderCours, supprimerCours, reactiverCours,
     sauvegarderMembre, archiverMembre, reactiverMembre,
