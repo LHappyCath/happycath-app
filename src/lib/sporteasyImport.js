@@ -236,3 +236,24 @@ export function parserCotisations(rows) {
     joursNoms: JOURS_NOMS,
   }
 }
+
+// Suggère un membre déjà existant dont le nom ressemble à un nom nouvellement rencontré.
+// Ne fusionne jamais automatiquement : sert uniquement à proposer un choix à l'utilisateur.
+export function suggererMembreExistant(nomNouveau, membresExistants) {
+  const tNouveau = new Set(normName(nomNouveau).split(' ').filter(Boolean))
+  let meilleur = null, meilleurScore = 0
+  for (const m of membresExistants) {
+    const tExist = new Set(normName(m.nom).split(' ').filter(Boolean))
+    if (tExist.size === 0 || tNouveau.size === 0) continue
+    const identiques = tExist.size === tNouveau.size && [...tExist].every(t => tNouveau.has(t))
+    const inclusion = [...tExist].every(t => tNouveau.has(t)) || [...tNouveau].every(t => tExist.has(t))
+    const intersection = [...tExist].filter(t => tNouveau.has(t)).length
+    let score = 0
+    if (identiques) score = 100
+    else if (inclusion && intersection > 0) score = 70
+    else if (intersection > 0) score = 30 * intersection
+    if (score > meilleurScore) { meilleurScore = score; meilleur = m }
+  }
+  return meilleurScore >= 30 ? meilleur : null
+}
+

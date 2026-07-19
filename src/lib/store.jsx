@@ -38,6 +38,7 @@ export function DataProvider({ children }) {
   const [abonnements, setAbonnements] = useState([])
   const [reglements, setReglements] = useState([])
   const [tarifs, setTarifs] = useState([])
+  const [parametres, setParametres] = useState({})
   const [loading, setLoading] = useState(true)
   const [online, setOnline] = useState(navigator.onLine)
   const [syncing, setSyncing] = useState(false)
@@ -56,6 +57,7 @@ export function DataProvider({ children }) {
         setAbonnements(cached.abonnements || [])
         setReglements(cached.reglements || [])
         setTarifs(cached.tarifs || [])
+        setParametres(cached.parametres || {})
       }
       setLoading(false)
       return
@@ -63,18 +65,20 @@ export function DataProvider({ children }) {
 
     try {
       const [
-        { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }
+        { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }
       ] = await Promise.all([
         supabase.from('cours').select('*').order('jour').order('heure'),
         supabase.from('membres').select('*').order('nom'),
         supabase.from('inscriptions').select('*'),
         supabase.from('historique').select('*').order('date', { ascending: false }),
-        supabase.from('abonnements').select('*').eq('saison', '2025-2026'),
+        supabase.from('abonnements').select('*'),
         supabase.from('reglements').select('*').order('date_encaissement', { ascending: false }),
-        supabase.from('tarifs').select('*').eq('saison', '2025-2026')
+        supabase.from('tarifs').select('*'),
+        supabase.from('parametres').select('*'),
       ])
 
-      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[] }
+      const paramsObj = Object.fromEntries((p||[]).map(x => [x.cle, x.valeur]))
+      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj }
       setCours(data.cours)
       setMembres(data.membres)
       setInscriptions(data.inscriptions)
@@ -82,6 +86,7 @@ export function DataProvider({ children }) {
       setAbonnements(data.abonnements)
       setReglements(data.reglements)
       setTarifs(data.tarifs)
+      setParametres(data.parametres)
       saveCache(data)
     } catch(e) {
       console.error('loadAll error:', e)
@@ -95,6 +100,7 @@ export function DataProvider({ children }) {
         setAbonnements(cached.abonnements || [])
         setReglements(cached.reglements || [])
         setTarifs(cached.tarifs || [])
+        setParametres(cached.parametres || {})
       }
     }
     setLoading(false)
@@ -508,12 +514,28 @@ export function DataProvider({ children }) {
     }
   }
 
+  const saisonActive = parametres.saison_active || '2026-2027'
+
+  async function definirSaisonActive(saison) {
+    setParametres(prev => ({ ...prev, saison_active: saison }))
+    const cached = loadCache()
+    if (cached) { cached.parametres = { ...(cached.parametres||{}), saison_active: saison }; saveCache(cached) }
+    try {
+      const { error } = await supabase.from('parametres').upsert({ cle: 'saison_active', valeur: saison }, { onConflict: 'cle' })
+      if (error) throw error
+      return { success: true }
+    } catch(e) {
+      return { error: e.message }
+    }
+  }
+
   const value = {
     // Données
-    cours, membres, inscriptions, historique, abonnements, reglements, tarifs,
+    cours, membres, inscriptions, historique, abonnements, reglements, tarifs, parametres, saisonActive,
     loading, online, syncing, queueSize,
     // Actions
     loadAll,
+    definirSaisonActive,
     sauvegarderAppel,
     sauvegarderCours, supprimerCours,
     sauvegarderMembre, archiverMembre,
