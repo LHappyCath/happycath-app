@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useData } from '../lib/store'
+import { lireFichierSportEasy, parserRosterMembres, suggererMembreExistant, CHAMPS_LABELS } from '../lib/sporteasyImport'
 
 const COULEURS = ['#FF0099','#8B4DB8','#1D9E75','#BA7517','#D85A30','#378ADD','#E24B4A','#0F6E56']
 const JOURS_FULL = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi']
@@ -292,6 +293,192 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver }) {
 }
 
 // ─── COMPOSANT PRINCIPAL ────────────────────────────────────────
+// ─── IMPORT ROSTER (fiches nominatives : stage, adhérents...) ──────
+function ImportRoster({ onClose }) {
+  const { membres, mettreAJourMembres } = useData()
+  const [statut, setStatut] = useState('idle')
+  const [erreur, setErreur] = useState(null)
+  const [personnes, setPersonnes] = useState([])
+  const [resolutions, setResolutions] = useState({})
+  const [diffs, setDiffs] = useState([])
+  const [resultat, setResultat] = useState(null)
+
+  async function onFichier(e) {
+    const f = e.target.files[0]
+    if (!f) return
+    setStatut('lecture'); setErreur(null)
+    try {
+      const rows = await lireFichierSportEasy(f)
+      const p = parserRosterMembres(rows)
+      setPersonnes(p)
+      const init = {}
+      for (const pers of p) {
+        const sugg = suggererMembreExistant(pers.nomFichier, membres)
+        init[pers._ligne] = sugg ? sugg.id : 'ignorer'
+      }
+      setResolutions(init)
+      setStatut('matching')
+    } catch (err) {
+      console.error(err)
+      setErreur("Impossible de lire ce fichier (.xlsx attendu).")
+      setStatut('erreur')
+    }
+  }
+
+  function construireDiffs() {
+    const items = []
+    for (const pers of personnes) {
+      const mid = resolutions[pers._ligne]
+      if (!mid || mid === 'ignorer') continue
+      const membre = membres.find(m => m.id === mid)
+      if (!membre) continue
+      const champsAuto = {}
+      const champsAmbigus = []
+      for (const [cle, nouveau] of Object.entries(pers.champs)) {
+        if (nouveau === null || nouveau === undefined || nouveau === '') continue
+        const ancien = membre[cle]
+        if (ancien === null || ancien === undefined || ancien === '') {
+          champsAuto[cle] = nouveau
+        } else if (String(ancien) !== String(nouveau)) {
+          champsAmbigus.push({ cle, ancien, nouveau, choix: 'ancien' })
+        }
+      }
+      if (Object.keys(champsAuto).length || champsAmbigus.length) {
+        items.push({ membreId: mid, nom: membre.nom, champsAuto, champsAmbigus })
+      }
+    }
+    setDiffs(items)
+    setStatut('diffs')
+  }
+
+  function setChoix(membreId, cle, choix) {
+    setDiffs(prev => prev.map(d => d.membreId === membreId
+      ? { ...d, champsAmbigus: d.champsAmbigus.map(c => c.cle === cle ? { ...c, choix } : c) }
+      : d))
+  }
+
+  async function appliquer() {
+    setStatut('application')
+    const patches = diffs.map(d => {
+      const champs = { ...d.champsAuto }
+      for (const c of d.champsAmbigus) {
+        if (c.choix === 'nouveau') champs[c.cle] = c.nouveau
+      }
+      return { id: d.membreId, champs }
+    }).filter(p => Object.keys(p.champs).length > 0)
+    const res = await mettreAJourMembres(patches)
+    if (res.error) { setErreur(res.error); setStatut('erreur') }
+    else { setResultat(res); setStatut('fait') }
+  }
+
+  return (
+    <Modal titre="Compléter les fiches depuis un fichier" onClose={onClose}>
+      {statut === 'idle' && (
+        <div>
+          <p style={{ fontSize:13, color:'#888', marginBottom:16 }}>
+            Dépose un fichier "fiches nominatives" (ex: roster de stage, liste adhérents SportEasy avec téléphone, date de naissance, consentements...).
+            Seuls les membres déjà existants dans l'appli sont mis à jour — les nouveaux noms ne sont pas créés ici.
+          </p>
+          <label style={{ display:'inline-block' }}>
+            <input type="file" accept=".xlsx" onChange={onFichier} style={{ display:'none' }} />
+            <span style={BTN.primary}>📂 Choisir un fichier .xlsx</span>
+          </label>
+        </div>
+      )}
+
+      {statut === 'lecture' && <p style={{ color:'#888', fontSize:14 }}>Lecture du fichier…</p>}
+
+      {statut === 'erreur' && (
+        <div>
+          <p style={{ color:'#D85A30', fontSize:14, marginBottom:12 }}>⚠ {erreur}</p>
+          <button style={BTN.ghost} onClick={onClose}>Fermer</button>
+        </div>
+      )}
+
+      {statut === 'matching' && (
+        <div>
+          <p style={{ fontSize:14, fontWeight:500, marginBottom:4 }}>Fais correspondre chaque personne ({personnes.length})</p>
+          <p style={{ fontSize:12, color:'#888', marginBottom:14 }}>
+            Les personnes non trouvées dans l'appli (stagiaires non-adhérents par ex.) restent sur "Ignorer" — on gèrera les stages séparément plus tard.
+          </p>
+          <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:16, maxHeight:400, overflowY:'auto' }}>
+            {personnes.map(p => (
+              <div key={p._ligne} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'#f7f7f8', borderRadius:10, flexWrap:'wrap' }}>
+                <span style={{ fontWeight:500, minWidth:160 }}>{p.nomFichier}</span>
+                <select
+                  style={{ ...INPUT, width:'auto', flex:1, minWidth:220, padding:'6px 10px' }}
+                  value={resolutions[p._ligne] || 'ignorer'}
+                  onChange={e => setResolutions(prev => ({ ...prev, [p._ligne]: e.target.value }))}
+                >
+                  <option value="ignorer">— Ignorer (pas encore adhérent) —</option>
+                  {membres.map(m => <option key={m.id} value={m.id}>🔗 {m.nom}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+          <div style={{ display:'flex', gap:10 }}>
+            <button style={BTN.ghost} onClick={onClose}>Annuler</button>
+            <button style={BTN.primary} onClick={construireDiffs}>Continuer →</button>
+          </div>
+        </div>
+      )}
+
+      {statut === 'diffs' && (
+        <div>
+          {diffs.length === 0 ? (
+            <div>
+              <p style={{ fontSize:14, color:'#888', marginBottom:16 }}>Rien à mettre à jour — les fiches liées sont déjà complètes et identiques.</p>
+              <button style={BTN.ghost} onClick={onClose}>Fermer</button>
+            </div>
+          ) : (
+            <div>
+              <p style={{ fontSize:14, fontWeight:500, marginBottom:14 }}>Vérifie les champs à mettre à jour ({diffs.length} fiche(s))</p>
+              <div style={{ display:'flex', flexDirection:'column', gap:14, marginBottom:16, maxHeight:440, overflowY:'auto' }}>
+                {diffs.map(d => (
+                  <div key={d.membreId} style={{ background:'#f7f7f8', borderRadius:10, padding:'12px 14px' }}>
+                    <p style={{ fontWeight:500, margin:'0 0 8px' }}>{d.nom}</p>
+                    {Object.keys(d.champsAuto).length > 0 && (
+                      <p style={{ fontSize:12, color:'#1D9E75', margin:'0 0 6px' }}>
+                        ✓ Complété automatiquement : {Object.keys(d.champsAuto).map(c => CHAMPS_LABELS[c]).join(', ')}
+                      </p>
+                    )}
+                    {d.champsAmbigus.map(c => (
+                      <div key={c.cle} style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', marginTop:6, fontSize:13 }}>
+                        <span style={{ minWidth:160, color:'#666' }}>{CHAMPS_LABELS[c.cle]} :</span>
+                        <label style={{ display:'flex', alignItems:'center', gap:4, cursor:'pointer' }}>
+                          <input type="radio" checked={c.choix==='ancien'} onChange={()=>setChoix(d.membreId, c.cle, 'ancien')} />
+                          Garder « {String(c.ancien)} »
+                        </label>
+                        <label style={{ display:'flex', alignItems:'center', gap:4, cursor:'pointer' }}>
+                          <input type="radio" checked={c.choix==='nouveau'} onChange={()=>setChoix(d.membreId, c.cle, 'nouveau')} />
+                          Remplacer par « {String(c.nouveau)} »
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display:'flex', gap:10 }}>
+                <button style={BTN.ghost} onClick={()=>setStatut('matching')}>← Retour</button>
+                <button style={BTN.primary} onClick={appliquer}>Appliquer les mises à jour</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {statut === 'application' && <p style={{ color:'#888', fontSize:14 }}>Mise à jour en cours…</p>}
+
+      {statut === 'fait' && (
+        <div>
+          <p style={{ fontSize:14, color:'#1D9E75', fontWeight:500, marginBottom:12 }}>✓ {resultat.nb} fiche(s) mise(s) à jour.</p>
+          <button style={BTN.ghost} onClick={onClose}>Fermer</button>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 export default function Membres() {
   const location = useLocation()
   const membreIdFromNav = location.state?.membreId
@@ -302,6 +489,7 @@ export default function Membres() {
   const [modal, setModal] = useState(null)
   const [toast, setToast] = useState(null)
   const [voirArchives, setVoirArchives] = useState(false)
+  const [showImportRoster, setShowImportRoster] = useState(false)
 
   // Ouvrir directement une fiche depuis le dashboard
   useEffect(() => {
@@ -353,7 +541,10 @@ export default function Membres() {
     <div>
       <div className="page-header">
         <h1 className="page-title">Membres</h1>
-        <button style={BTN.primary} onClick={()=>setModal('nouveau')}>+ Nouveau membre</button>
+        <div style={{ display:'flex', gap:8 }}>
+          <button style={BTN.ghost} onClick={()=>setShowImportRoster(true)}>📂 Compléter des fiches</button>
+          <button style={BTN.primary} onClick={()=>setModal('nouveau')}>+ Nouveau membre</button>
+        </div>
       </div>
 
       <div className="stats-grid">
@@ -430,6 +621,8 @@ export default function Membres() {
             onClose={()=>setModal(null)} />
         </Modal>
       )}
+
+      {showImportRoster && <ImportRoster onClose={()=>setShowImportRoster(false)} />}
 
       {toast && <div style={{ position:'fixed', bottom:90, left:'50%', transform:'translateX(-50%)', background:'#1a1a1a', color:'#fff', padding:'10px 20px', borderRadius:20, fontSize:14, fontWeight:500, zIndex:400, whiteSpace:'nowrap' }}>✓ {toast}</div>}
     </div>
