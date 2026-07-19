@@ -155,6 +155,7 @@ export function DataProvider({ children }) {
   // ─── REALTIME SUPABASE ───────────────────────────────────────
   useEffect(() => {
     loadAll()
+    if (navigator.onLine) syncQueue()
     if (!navigator.onLine) return
 
     realtimeSub.current = supabase.channel('global_store')
@@ -169,9 +170,7 @@ export function DataProvider({ children }) {
       .subscribe()
 
     return () => { if (realtimeSub.current) supabase.removeChannel(realtimeSub.current) }
-  }, [loadAll])
-
-  // ─── OPÉRATIONS D'ÉCRITURE ───────────────────────────────────
+  }, [loadAll, syncQueue])
 
   // Ajouter une opération à la file d'attente hors ligne
   function enqueue(op) {
@@ -209,7 +208,7 @@ export function DataProvider({ children }) {
   }
 
   // Insert
-  async function insert(table, payload, localUpdate) {
+  async function insert(table, payload, localUpdate, localRevert) {
     localUpdate()
     const cached = loadCache()
     if (cached && cached[table]) {
@@ -226,8 +225,13 @@ export function DataProvider({ children }) {
       if (error) throw error
       return { success: true }
     } catch(e) {
-      enqueue({ action: 'insert', table, payload })
-      return { queued: true }
+      if (!navigator.onLine) {
+        enqueue({ action: 'insert', table, payload })
+        return { queued: true }
+      }
+      if (localRevert) localRevert()
+      console.error(`Erreur enregistrement ${table}:`, e)
+      return { error: e.message || 'Échec de l\'enregistrement' }
     }
   }
 
@@ -440,8 +444,16 @@ export function DataProvider({ children }) {
       if (cached) { cached.reglements = [...finales, ...(cached.reglements||[])]; saveCache(cached) }
       return { success: true, finales }
     } catch(e) {
-      enqueue({ action: 'insert', table: 'reglements', payload: finales })
-      return { queued: true, finales }
+      if (!navigator.onLine) {
+        enqueue({ action: 'insert', table: 'reglements', payload: finales })
+        return { queued: true, finales }
+      }
+      // Vraiment en ligne mais l'enregistrement a échoué (ex: colonne manquante, contrainte...) :
+      // on annule l'ajout optimiste local pour ne pas afficher une donnée qui n'est pas réellement enregistrée,
+      // et on remonte l'erreur pour qu'elle soit visible plutôt que silencieusement perdue.
+      setReglements(prev => prev.filter(r => !finales.some(f => f.id === r.id)))
+      console.error('Erreur enregistrement chèques:', e)
+      return { error: e.message || "Échec de l'enregistrement des chèques" }
     }
   }
 
@@ -457,7 +469,7 @@ export function DataProvider({ children }) {
       saison: saisonActive,
       ...payload,
     }
-    return insert('reglements', data, () => setReglements(prev => [data, ...prev]))
+    return insert('reglements', data, () => setReglements(prev => [data, ...prev]), () => setReglements(prev => prev.filter(r => r.id !== data.id)))
   }
 
   async function modifierReglement(id, patch) {
