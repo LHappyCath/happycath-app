@@ -5,7 +5,9 @@ import Accueil from './pages/Accueil'
 import Membres from './pages/Membres'
 import Cours from './pages/Cours'
 import Dashboard from './pages/Dashboard'
-import { Reglements, Budget, Factures } from './pages/AutresPages'
+import Reglements from './pages/Reglements'
+import Inscriptions from './pages/Inscriptions'
+import { Budget, Factures } from './pages/AutresPages'
 import './index.css'
 
 export default function App() {
@@ -18,6 +20,7 @@ export default function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/cours" element={<Cours />} />
             <Route path="/membres" element={<Membres />} />
+            <Route path="/inscriptions" element={<Inscriptions />} />
             <Route path="/reglements" element={<Reglements />} />
             <Route path="/budget" element={<Budget />} />
             <Route path="/factures" element={<Factures />} />
