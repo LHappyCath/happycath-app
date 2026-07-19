@@ -340,9 +340,9 @@ export function DataProvider({ children }) {
       enqueue({ action: 'upsert', table: '_abonnement', payload: { membreId, ...aboData } })
       return { offline: true }
     }
-    await supabase.from('abonnements').delete().eq('membre_id', membreId).eq('saison', '2025-2026')
+    await supabase.from('abonnements').delete().eq('membre_id', membreId).eq('saison', saisonActive)
     if (aboData.date_debut) {
-      await supabase.from('abonnements').insert({ membre_id: membreId, saison: '2025-2026', ...aboData, statut: 'actif' })
+      await supabase.from('abonnements').insert({ membre_id: membreId, saison: saisonActive, ...aboData, statut: 'actif' })
     }
     await loadAll()
     return { success: true }
@@ -379,7 +379,7 @@ export function DataProvider({ children }) {
         groupe_id: groupeId,
         statut: 'en_attente',
         endosse: false,
-        saison: p.saison || '2025-2026',
+        saison: p.saison || saisonActive,
       }
     })
 
@@ -401,6 +401,44 @@ export function DataProvider({ children }) {
     }
   }
 
+  // Insère des lignes de chèques déjà construites telles quelles (respecte les ajustements
+  // individuels faits à l'écran, contrairement à creerReglementsGroupes qui régénère tout)
+  async function creerReglementsPersonnalises(lignes, meta) {
+    const groupeId = 'grp' + Date.now().toString(36)
+    const finales = lignes.map((l, idx) => ({
+      id: 'r' + Date.now().toString(36) + idx,
+      membre_id: meta.membreId || null,
+      cours_id: meta.coursId || null,
+      payeur: meta.payeur,
+      montant: Number(l.montant),
+      mode: 'Chèque',
+      banque: meta.banque,
+      numero_cheque: l.numero_cheque,
+      date_encaissement: l.date_encaissement,
+      periodicite: meta.periodicite,
+      echeance_num: idx + 1,
+      echeance_total: lignes.length,
+      source: meta.source || 'direct',
+      groupe_id: groupeId,
+      statut: 'en_attente',
+      endosse: false,
+      saison: meta.saison || saisonActive,
+    }))
+
+    setReglements(prev => [...finales, ...prev])
+    if (!navigator.onLine) { enqueue({ action: 'insert', table: 'reglements', payload: finales }); return { offline: true, finales } }
+    try {
+      const { error } = await supabase.from('reglements').insert(finales)
+      if (error) throw error
+      const cached = loadCache()
+      if (cached) { cached.reglements = [...finales, ...(cached.reglements||[])]; saveCache(cached) }
+      return { success: true, finales }
+    } catch(e) {
+      enqueue({ action: 'insert', table: 'reglements', payload: finales })
+      return { queued: true, finales }
+    }
+  }
+
   // Un seul règlement (CB, espèces, virement, ou chèque isolé)
   async function creerReglement(payload) {
     const data = {
@@ -410,7 +448,7 @@ export function DataProvider({ children }) {
       echeance_num: 1,
       echeance_total: 1,
       source: 'direct',
-      saison: '2025-2026',
+      saison: saisonActive,
       ...payload,
     }
     return insert('reglements', data, () => setReglements(prev => [data, ...prev]))
@@ -450,8 +488,8 @@ export function DataProvider({ children }) {
 
   // Tarifs
   async function sauvegarderTarif(payload) {
-    const isNew = !tarifs.find(t => t.cours_id === payload.cours_id && t.periodicite === payload.periodicite && t.saison === (payload.saison||'2025-2026'))
-    const data = { saison: '2025-2026', ...payload }
+    const isNew = !tarifs.find(t => t.cours_id === payload.cours_id && t.periodicite === payload.periodicite && t.saison === (payload.saison||saisonActive))
+    const data = { saison: saisonActive, ...payload }
     if (!navigator.onLine) { enqueue({ action: 'upsert', table: 'tarifs', payload: data }); return { offline: true } }
     try {
       const { data: saved, error } = await supabase.from('tarifs').upsert(data, { onConflict: 'cours_id,periodicite,saison' }).select()
@@ -578,7 +616,7 @@ export function DataProvider({ children }) {
     sauvegarderInscriptions,
     supprimerAppel,
     sauvegarderAbonnement,
-    creerReglementsGroupes, creerReglement, modifierReglement, toggleEndossement, supprimerReglement,
+    creerReglementsGroupes, creerReglementsPersonnalises, creerReglement, modifierReglement, toggleEndossement, supprimerReglement,
     sauvegarderTarif,
     importerLot,
     mettreAJourMembres,
