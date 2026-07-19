@@ -333,24 +333,27 @@ function LigneReglement({ r, coursNom }) {
 
 // ─── PAGE PRINCIPALE ────────────────────────────────────────────────
 export default function Reglements() {
-  const { reglements, cours } = useData()
+  const { reglements, cours, saisonActive } = useData()
   const [showCheques, setShowCheques] = useState(false)
   const [showSimple, setShowSimple] = useState(false)
   const [filtreMode, setFiltreMode] = useState('Tous')
   const [filtreEndossement, setFiltreEndossement] = useState('Tous')
+  const [filtreSaison, setFiltreSaison] = useState(saisonActive)
   const [recherche, setRecherche] = useState('')
 
   const coursNomDe = (id) => cours.find(c => c.id === id)?.nom
+  const saisons = useMemo(() => [...new Set(reglements.map(r => r.saison).filter(Boolean))].sort().reverse(), [reglements])
 
   const filtres = useMemo(() => {
     return reglements
+      .filter(r => filtreSaison === 'Toutes' || r.saison === filtreSaison)
       .filter(r => filtreMode === 'Tous' || r.mode === filtreMode)
       .filter(r => filtreEndossement === 'Tous' || (filtreEndossement === 'Endossés' ? r.endosse : (r.mode === 'Chèque' && !r.endosse)))
       .filter(r => !recherche || (r.payeur||'').toLowerCase().includes(recherche.toLowerCase()))
-  }, [reglements, filtreMode, filtreEndossement, recherche])
+  }, [reglements, filtreMode, filtreEndossement, filtreSaison, recherche])
 
   const totalAffiche = filtres.reduce((s,r) => s + Number(r.montant||0), 0)
-  const nbChequesNonEndosses = reglements.filter(r => r.mode === 'Chèque' && !r.endosse).length
+  const nbChequesNonEndosses = reglements.filter(r => r.mode === 'Chèque' && !r.endosse && r.saison === saisonActive).length
 
   return (
     <div>
@@ -364,7 +367,7 @@ export default function Reglements() {
 
       {nbChequesNonEndosses > 0 && (
         <div style={{ background:'rgba(216,90,48,0.08)', border:'0.5px solid rgba(216,90,48,0.2)', borderRadius:10, padding:'10px 14px', marginBottom:16, fontSize:13, color:'#D85A30' }}>
-          ⚠ {nbChequesNonEndosses} chèque(s) non endossé(s) — pense à vérifier l'ordre et à les endosser dès réception.
+          ⚠ {nbChequesNonEndosses} chèque(s) non endossé(s) sur la saison {saisonActive} — pense à vérifier l'ordre et à les endosser dès réception.
         </div>
       )}
 
@@ -375,6 +378,10 @@ export default function Reglements() {
           value={recherche}
           onChange={e=>setRecherche(e.target.value)}
         />
+        <select style={{ ...INPUT, width:'auto', fontWeight:600 }} value={filtreSaison} onChange={e=>setFiltreSaison(e.target.value)}>
+          <option value="Toutes">Toutes les saisons</option>
+          {saisons.map(s => <option key={s} value={s}>{s}{s===saisonActive ? ' (active)' : ''}</option>)}
+        </select>
         <select style={{ ...INPUT, width:'auto' }} value={filtreMode} onChange={e=>setFiltreMode(e.target.value)}>
           <option value="Tous">Tous les modes</option>
           <option value="Chèque">Chèque</option>
