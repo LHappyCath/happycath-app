@@ -50,19 +50,6 @@ export function Cours() {
   )
 }
 
-export function Reglements() {
-  return (
-    <div>
-      <div className="page-header"><h1 className="page-title">Règlements</h1><button style={{ padding:'9px 18px', borderRadius:8, border:'none', background:'#FF0099', color:'#fff', cursor:'pointer', fontSize:14, fontWeight:500 }}>+ Nouveau règlement</button></div>
-      <div className="card" style={{ textAlign:'center', padding:40 }}>
-        <p style={{ fontSize:32, marginBottom:12 }}>💶</p>
-        <p style={{ fontWeight:500, marginBottom:6 }}>Module règlements</p>
-        <p style={{ color:'#888', fontSize:14 }}>Chèques, espèces, remises banque — en cours de développement</p>
-      </div>
-    </div>
-  )
-}
-
 export function Budget() {
   return (
     <div>
