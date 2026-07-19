@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { supabase } from './supabase'
 
 const DataContext = createContext(null)
@@ -659,14 +659,17 @@ export function DataProvider({ children }) {
     if (!remise) return { error: 'Remise introuvable' }
     const nouveauTotal = Number(remise.montant_total||0) + cheques.reduce((s,c) => s + Number(c.montant||0), 0)
     const nouveauNb = Number(remise.nb_reglements||0) + cheques.length
+    const banquesExistantes = (remise.banque||'').split(',').map(b=>b.trim()).filter(Boolean)
+    const nouvellesBanques = [...new Set(cheques.map(c => c.banque || 'Banque non renseignée'))]
+    const banqueFusionnee = [...new Set([...banquesExistantes, ...nouvellesBanques])].join(', ')
     try {
       for (const c of cheques) {
         const { error } = await supabase.from('reglements').update({ numero_remise: numero }).eq('id', c.id)
         if (error) throw error
       }
-      const { error } = await supabase.from('remises').update({ montant_total: nouveauTotal, nb_reglements: nouveauNb }).eq('numero', numero)
+      const { error } = await supabase.from('remises').update({ montant_total: nouveauTotal, nb_reglements: nouveauNb, banque: banqueFusionnee }).eq('numero', numero)
       if (error) throw error
-      setRemises(prev => prev.map(r => r.numero === numero ? { ...r, montant_total: nouveauTotal, nb_reglements: nouveauNb } : r))
+      setRemises(prev => prev.map(r => r.numero === numero ? { ...r, montant_total: nouveauTotal, nb_reglements: nouveauNb, banque: banqueFusionnee } : r))
       setReglements(prev => prev.map(r => cheques.some(c => c.id === r.id) ? { ...r, numero_remise: numero } : r))
       return { success: true }
     } catch(e) {
@@ -685,13 +688,44 @@ export function DataProvider({ children }) {
     }
   }
 
+  async function ajouterBanque(nom) {
+    const nomPropre = nom.trim()
+    if (!nomPropre) return { error: 'Nom vide' }
+    const actuelles = banquesConnues
+    if (actuelles.includes(nomPropre)) return { success: true }
+    const nouvelles = [...actuelles, nomPropre].sort((a,b) => a.localeCompare(b))
+    return definirParametre('banques_connues', JSON.stringify(nouvelles))
+  }
+
+  async function definirParametre(cle, valeur) {
+    setParametres(prev => ({ ...prev, [cle]: valeur }))
+    const cached = loadCache()
+    if (cached) { cached.parametres = { ...(cached.parametres||{}), [cle]: valeur }; saveCache(cached) }
+    try {
+      const { error } = await supabase.from('parametres').upsert({ cle, valeur }, { onConflict: 'cle' })
+      if (error) throw error
+      return { success: true }
+    } catch(e) {
+      return { error: e.message }
+    }
+  }
+
+  const banquesConnues = useMemo(() => {
+    try {
+      const stockees = JSON.parse(parametres.banques_connues || '[]')
+      const vues = [...new Set(reglements.map(r => r.banque).filter(Boolean))]
+      return [...new Set([...stockees, ...vues])].sort((a,b) => a.localeCompare(b))
+    } catch { return [] }
+  }, [parametres.banques_connues, reglements])
+
   const value = {
     // Données
-    cours, membres, inscriptions, historique, abonnements, reglements, tarifs, parametres, saisonActive, remises,
+    cours, membres, inscriptions, historique, abonnements, reglements, tarifs, parametres, saisonActive, remises, banquesConnues,
     loading, online, syncing, queueSize,
     // Actions
     loadAll,
     definirSaisonActive,
+    ajouterBanque,
     creerRemises, ajouterChequesRemise, modifierStatutRemise,
     sauvegarderAppel,
     sauvegarderCours, supprimerCours, reactiverCours,
