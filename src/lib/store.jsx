@@ -613,18 +613,20 @@ export function DataProvider({ children }) {
   // Crée plusieurs remises d'un coup à partir de lots déjà préparés (groupés/triés côté écran)
   // lots: [{ banque, cheques: [reglement, ...], dateRemise }]
   async function creerRemises(lots) {
-    // Numérotation séquentielle par mois, en repartant du dernier numéro connu en base
-    const dateRef = lots[0]?.dateRemise ? new Date(lots[0].dateRemise+'T12:00:00') : new Date()
-    const prefixe = `CHQ-${dateRef.getFullYear()}-${String(dateRef.getMonth()+1).padStart(2,'0')}`
-    const existants = remises.filter(r => r.numero.startsWith(prefixe))
-    let compteur = existants.length
-
+    // Numérotation séquentielle par mois (le mois vient de la date d'encaissement des chèques,
+    // pas de la date du jour — permet de préparer plusieurs mois à l'avance en une seule fois)
+    const compteurs = {}
     const nouvellesRemises = []
     const patchesReglements = []
 
     for (const lot of lots) {
-      compteur++
-      const numero = `${prefixe}-${String(compteur).padStart(2,'0')}`
+      const d = new Date(lot.dateRemise+'T12:00:00')
+      const prefixe = `CHQ-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+      if (!(prefixe in compteurs)) {
+        compteurs[prefixe] = remises.filter(r => r.numero.startsWith(prefixe)).length
+      }
+      compteurs[prefixe]++
+      const numero = `${prefixe}-${String(compteurs[prefixe]).padStart(2,'0')}`
       const montantTotal = lot.cheques.reduce((s,c) => s + Number(c.montant||0), 0)
       nouvellesRemises.push({
         numero, type: 'CHQ', banque: lot.banque, date_remise: lot.dateRemise,
@@ -652,6 +654,26 @@ export function DataProvider({ children }) {
     }
   }
 
+  async function ajouterChequesRemise(numero, cheques) {
+    const remise = remises.find(r => r.numero === numero)
+    if (!remise) return { error: 'Remise introuvable' }
+    const nouveauTotal = Number(remise.montant_total||0) + cheques.reduce((s,c) => s + Number(c.montant||0), 0)
+    const nouveauNb = Number(remise.nb_reglements||0) + cheques.length
+    try {
+      for (const c of cheques) {
+        const { error } = await supabase.from('reglements').update({ numero_remise: numero }).eq('id', c.id)
+        if (error) throw error
+      }
+      const { error } = await supabase.from('remises').update({ montant_total: nouveauTotal, nb_reglements: nouveauNb }).eq('numero', numero)
+      if (error) throw error
+      setRemises(prev => prev.map(r => r.numero === numero ? { ...r, montant_total: nouveauTotal, nb_reglements: nouveauNb } : r))
+      setReglements(prev => prev.map(r => cheques.some(c => c.id === r.id) ? { ...r, numero_remise: numero } : r))
+      return { success: true }
+    } catch(e) {
+      return { error: e.message || "Erreur lors de l'ajout à la remise" }
+    }
+  }
+
   async function modifierStatutRemise(numero, statut) {
     try {
       const { error } = await supabase.from('remises').update({ statut }).eq('numero', numero)
@@ -670,7 +692,7 @@ export function DataProvider({ children }) {
     // Actions
     loadAll,
     definirSaisonActive,
-    creerRemises, modifierStatutRemise,
+    creerRemises, ajouterChequesRemise, modifierStatutRemise,
     sauvegarderAppel,
     sauvegarderCours, supprimerCours, reactiverCours,
     sauvegarderMembre, archiverMembre, reactiverMembre,
