@@ -311,71 +311,98 @@ function fmtMoisAnnee(dateStr) {
 }
 
 function FormPreparerRemise({ onClose }) {
-  const { reglements, membres, creerRemises } = useData()
+  const { reglements, membres, remises, creerRemises, ajouterChequesRemise } = useData()
   const [maxParRemise, setMaxParRemise] = useState(25)
-  const [dateRemise, setDateRemise] = useState(new Date().toISOString().slice(0,10))
   const [saving, setSaving] = useState(false)
 
   const membreNomDe = (id) => membres.find(m => m.id === id)?.nom || ''
 
-  // Chèques endossés, pas encore affectés à une remise
+  // Chèques endossés, pas encore affectés à une remise (y compris ceux encaissables dans le futur)
   const chequesEligibles = useMemo(() => {
-    return reglements.filter(r => r.mode === 'Chèque' && r.endosse && !r.numero_remise)
+    return reglements.filter(r => r.mode === 'Chèque' && r.endosse && !r.numero_remise && r.date_encaissement)
   }, [reglements])
 
-  // Groupe par banque, trie par nom de payeur, puis découpe en lots de taille max
+  // Groupe par banque + mois d'encaissement. Si une remise "préparée" (pas encore déposée) existe déjà
+  // pour ce couple banque/mois, on complète celle-ci en priorité au lieu d'en créer une nouvelle à côté.
   const lots = useMemo(() => {
-    const parBanque = {}
+    const parGroupe = {}
     for (const c of chequesEligibles) {
+      const mois = c.date_encaissement.slice(0, 7) // 'YYYY-MM'
       const banque = c.banque || '— Banque non renseignée —'
-      if (!parBanque[banque]) parBanque[banque] = []
-      parBanque[banque].push(c)
+      const cle = `${banque}||${mois}`
+      if (!parGroupe[cle]) parGroupe[cle] = { banque, mois, cheques: [] }
+      parGroupe[cle].cheques.push(c)
     }
     const resultat = []
-    for (const [banque, cheques] of Object.entries(parBanque)) {
-      const tries = [...cheques].sort((a,b) => (a.payeur||'').localeCompare(b.payeur||''))
-      for (let i = 0; i < tries.length; i += maxParRemise) {
-        resultat.push({ banque, cheques: tries.slice(i, i + maxParRemise), dateRemise })
+    for (const g of Object.values(parGroupe)) {
+      const tries = [...g.cheques].sort((a,b) => (a.payeur||'').localeCompare(b.payeur||''))
+      const remiseExistante = remises.find(r => r.banque === g.banque && r.date_remise?.slice(0,7) === g.mois && r.statut === 'prepare')
+      let reste = tries
+      if (remiseExistante) {
+        const placesRestantes = Math.max(0, maxParRemise - remiseExistante.nb_reglements)
+        const ajout = tries.slice(0, placesRestantes)
+        reste = tries.slice(placesRestantes)
+        if (ajout.length) {
+          resultat.push({ mode:'ajout', numero: remiseExistante.numero, banque: g.banque, mois: g.mois, cheques: ajout })
+        }
+      }
+      for (let i = 0; i < reste.length; i += maxParRemise) {
+        resultat.push({ mode:'creation', banque: g.banque, mois: g.mois, dateRemise: g.mois + '-01', cheques: reste.slice(i, i + maxParRemise) })
       }
     }
-    return resultat.sort((a,b) => a.banque.localeCompare(b.banque))
-  }, [chequesEligibles, maxParRemise, dateRemise])
+    return resultat.sort((a,b) => a.mois.localeCompare(b.mois) || a.banque.localeCompare(b.banque))
+  }, [chequesEligibles, maxParRemise, remises])
 
   async function valider() {
     if (!lots.length) return
     setSaving(true)
-    const res = await creerRemises(lots)
+    const aCreer = lots.filter(l => l.mode === 'creation')
+    const aAjouter = lots.filter(l => l.mode === 'ajout')
+    if (aCreer.length) await creerRemises(aCreer)
+    for (const l of aAjouter) await ajouterChequesRemise(l.numero, l.cheques)
     setSaving(false)
-    if (!res.error) onClose()
+    onClose()
   }
 
   return (
     <Modal titre="Préparer les remises de chèques" onClose={onClose} wide>
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:16 }}>
         <div>
-          <label style={LABEL}>Date de remise</label>
-          <input style={INPUT} type="date" value={dateRemise} onChange={e=>setDateRemise(e.target.value)} />
-        </div>
-        <div>
           <label style={LABEL}>Max de chèques par remise</label>
           <input style={{ ...INPUT, width:90 }} type="number" min={1} max={50} value={maxParRemise} onChange={e=>setMaxParRemise(Number(e.target.value)||25)} />
         </div>
       </div>
+      <p style={{ fontSize:12, color:'#888', marginTop:-10, marginBottom:16 }}>
+        Le mois de chaque remise correspond au mois d'encaissement écrit sur les chèques — toutes les remises à venir (mois futurs inclus) sont proposées en une fois.
+        Si une remise du même mois/banque est déjà préparée (et pas encore déposée), les nouveaux chèques viennent la compléter au lieu d'en créer une autre.
+      </p>
 
       {chequesEligibles.length === 0 ? (
         <p style={{ fontSize:14, color:'#888' }}>Aucun chèque endossé en attente de remise — tout est déjà remis, ou rien n'est encore endossé.</p>
       ) : (
         <div>
           <p style={{ fontSize:13, color:'#888', marginBottom:14 }}>
-            {chequesEligibles.length} chèque(s) endossé(s) à répartir → {lots.length} remise(s) proposée(s), regroupées par banque, triées par payeur.
+            {chequesEligibles.length} chèque(s) endossé(s) à répartir → {lots.length} lot(s) proposé(s), classés par mois puis par banque.
           </p>
           <div style={{ display:'flex', flexDirection:'column', gap:12, marginBottom:16, maxHeight:440, overflowY:'auto' }}>
             {lots.map((lot, idx) => {
               const total = lot.cheques.reduce((s,c)=>s+Number(c.montant||0),0)
               return (
                 <div key={idx} style={{ background:'#f7f7f8', borderRadius:10, padding:'12px 14px' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-                    <span style={{ fontWeight:500 }}>{lot.banque} — {fmtMoisAnnee(dateRemise)}</span>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8, flexWrap:'wrap', gap:6 }}>
+                    <span style={{ fontWeight:500 }}>
+                      {fmtMoisAnnee(lot.dateRemise || lot.mois+'-01')} — {lot.banque}
+                      {lot.mode === 'ajout' && (
+                        <span style={{ marginLeft:8, fontSize:11, fontWeight:500, color:'#378ADD', background:'#378ADD20', borderRadius:10, padding:'2px 8px' }}>
+                          + ajout à {lot.numero}
+                        </span>
+                      )}
+                      {lot.mode === 'creation' && (
+                        <span style={{ marginLeft:8, fontSize:11, fontWeight:500, color:'#1D9E75', background:'#1D9E7520', borderRadius:10, padding:'2px 8px' }}>
+                          nouvelle remise
+                        </span>
+                      )}
+                    </span>
                     <span style={{ fontSize:13, color:'#666' }}>{lot.cheques.length} chèque(s) · <strong>{fmtEuros(total)}</strong></span>
                   </div>
                   <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
@@ -396,7 +423,7 @@ function FormPreparerRemise({ onClose }) {
           </div>
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
             <button style={BTN.ghost} onClick={onClose}>Annuler</button>
-            <button style={BTN.primary} disabled={saving} onClick={valider}>{saving ? 'Création…' : `Créer les ${lots.length} remise(s)`}</button>
+            <button style={BTN.primary} disabled={saving} onClick={valider}>{saving ? 'Enregistrement…' : `Valider (${lots.length} lot(s))`}</button>
           </div>
         </div>
       )}
