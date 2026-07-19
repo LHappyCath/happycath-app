@@ -91,14 +91,21 @@ function FormChequesGroupes({ onClose }) {
     setLignes(prev => prev.map((l,i) => i === idx ? { ...l, [key]: val } : l))
   }
 
+  const [erreur, setErreur] = useState(null)
+
   async function valider() {
     setSaving(true)
-    await creerReglementsPersonnalises(lignes, {
+    setErreur(null)
+    const res = await creerReglementsPersonnalises(lignes, {
       payeur: form.payeur, membreId: form.membreId, coursId: form.coursId, banque: form.banque,
       periodicite: form.periodicite, source: form.source,
     })
     setSaving(false)
-    onClose()
+    if (res?.error) {
+      setErreur(res.error)
+    } else {
+      onClose()
+    }
   }
 
   if (step === 1) {
@@ -199,6 +206,9 @@ function FormChequesGroupes({ onClose }) {
         <span style={{ fontSize:13, color:'#666' }}>Total</span>
         <span style={{ fontSize:16, fontWeight:600, color:'#FF0099' }}>{fmtEuros(lignes.reduce((s,l)=>s+Number(l.montant||0),0))}</span>
       </div>
+      {erreur && (
+        <p style={{ fontSize:13, color:'#D85A30', marginTop:12, marginBottom:0 }}>⚠ {erreur} — réessaie, et si ça persiste, vérifie ta connexion ou préviens-moi.</p>
+      )}
       <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:16 }}>
         <button style={BTN.ghost} onClick={()=>setStep(1)}>← Retour</button>
         <button style={BTN.primary} disabled={saving} onClick={valider}>{saving ? 'Enregistrement…' : 'Valider les chèques'}</button>
@@ -212,18 +222,21 @@ function FormReglementSimple({ onClose }) {
   const { membres, cours, creerReglement } = useData()
   const [form, setForm] = useState({ payeur:'', membreId:'', coursId:'', montant:'', mode:'CB', commentaire:'' })
   const [saving, setSaving] = useState(false)
+  const [erreur, setErreur] = useState(null)
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
   async function valider() {
     if (!form.payeur || !form.montant) return
     setSaving(true)
-    await creerReglement({
+    setErreur(null)
+    const res = await creerReglement({
       payeur: form.payeur, membre_id: form.membreId || null, cours_id: form.coursId || null,
       montant: Number(form.montant), mode: form.mode, commentaire: form.commentaire,
       date_encaissement: new Date().toISOString().slice(0,10),
     })
     setSaving(false)
-    onClose()
+    if (res?.error) setErreur(res.error)
+    else onClose()
   }
 
   return (
@@ -265,6 +278,7 @@ function FormReglementSimple({ onClose }) {
           <label style={LABEL}>Commentaire</label>
           <input style={INPUT} value={form.commentaire} onChange={e=>set('commentaire', e.target.value)} />
         </div>
+        {erreur && <p style={{ fontSize:13, color:'#D85A30', margin:0 }}>⚠ {erreur}</p>}
         <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:6 }}>
           <button style={BTN.ghost} onClick={onClose}>Annuler</button>
           <button style={BTN.primary} disabled={saving || !form.payeur || !form.montant} onClick={valider}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
