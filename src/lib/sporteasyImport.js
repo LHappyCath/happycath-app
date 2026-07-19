@@ -239,6 +239,63 @@ export function parserCotisations(rows) {
   }
 }
 
+// ─── Parsing d'un fichier "roster" (fiches nominatives, ex: stage, adhérents) ──
+// Colonnes attendues : Payeur, Prénom, Nom, Email, Téléphone, Date de naissance, Sexe,
+// Etat de santé, Politique de confidentialité, Droit à l'image (les autres colonnes sont ignorées)
+function normTelephone(t) {
+  if (!t) return null
+  let s = String(t).trim().replace(/\s+/g, '')
+  s = s.replace(/^\++/, '+') // corrige les "++33..." en "+33..."
+  return s
+}
+function ouiNon(v) {
+  if (v === null || v === undefined) return null
+  const s = String(v).trim().toLowerCase()
+  if (s === 'oui') return true
+  if (s === 'non') return false
+  return null
+}
+function parseDateNaissance(v) {
+  if (!v) return null
+  if (v instanceof Date) return v.toISOString().slice(0,10)
+  const s = String(v).trim()
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`
+  return null
+}
+
+export function parserRosterMembres(rows) {
+  const personnes = rows.map((r, idx) => {
+    const prenom = (r['Prénom'] || '').toString().trim()
+    const nom = (r['Nom'] || '').toString().trim()
+    const nomComplet = [prenom, nom].filter(Boolean).map(s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()).join(' ')
+    return {
+      _ligne: idx,
+      nomFichier: nomComplet,
+      champs: {
+        telephone: normTelephone(r['Téléphone']),
+        email: r['Email'] ? String(r['Email']).trim() : (r['Payeur'] ? String(r['Payeur']).trim() : null),
+        date_naissance: parseDateNaissance(r['Date de naissance']),
+        sexe: r['Sexe'] ? String(r['Sexe']).trim() : null,
+        consentement_sante: ouiNon(r['Etat de santé']),
+        consentement_image: ouiNon(r["Droit à l'image"]),
+        consentement_confidentialite: ouiNon(r['Politique de confidentialité']),
+      },
+    }
+  }).filter(p => p.nomFichier)
+  return personnes
+}
+
+export const CHAMPS_LABELS = {
+  telephone: 'Téléphone',
+  email: 'Email',
+  date_naissance: 'Date de naissance',
+  sexe: 'Sexe',
+  consentement_sante: 'Consentement état de santé',
+  consentement_image: "Droit à l'image",
+  consentement_confidentialite: 'Politique de confidentialité',
+}
+
 // Suggère un membre déjà existant dont le nom ressemble à un nom nouvellement rencontré.
 // Ne fusionne jamais automatiquement : sert uniquement à proposer un choix à l'utilisateur.
 export function suggererMembreExistant(nomNouveau, membresExistants) {
@@ -258,4 +315,3 @@ export function suggererMembreExistant(nomNouveau, membresExistants) {
   }
   return meilleurScore >= 30 ? meilleur : null
 }
-
