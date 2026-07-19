@@ -17,7 +17,9 @@ const MOIS_FR = { 'janv':1,'jan':1,'fevr':2,'fev':2,'mars':3,'avr':4,'mai':5,'ju
 
 function academicSeason(d) {
   const y = d.getFullYear()
-  return d.getMonth() + 1 >= 9 ? `${y}-${y+1}` : `${y-1}-${y}`
+  const m = d.getMonth() + 1
+  // Les préinscriptions démarrent dès juin pour la saison suivante (ex: juin 2026 -> saison 2026-2027)
+  return m >= 6 ? `${y}-${y+1}` : `${y-1}-${y}`
 }
 
 // Alias de noms : certains cours ont 2 libellés légèrement différents dans SportEasy
