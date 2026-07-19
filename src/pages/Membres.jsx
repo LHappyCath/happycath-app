@@ -31,8 +31,8 @@ function Modal({ titre, onClose, children }) {
 
 // ─── ABONNEMENT INFO ────────────────────────────────────────────
 function AboInfo({ membreId }) {
-  const { abonnements } = useData()
-  const abo = abonnements.find(a=>a.membre_id===membreId&&a.saison==='2025-2026'&&a.statut==='actif')
+  const { abonnements, saisonActive } = useData()
+  const abo = abonnements.find(a=>a.membre_id===membreId&&a.saison===saisonActive&&a.statut==='actif')
   if (!abo) return null
   const debut = abo.date_debut ? new Date(abo.date_debut+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'}) : '—'
   const fin = abo.date_fin ? new Date(abo.date_fin+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'}) : '—'
@@ -47,7 +47,7 @@ function AboInfo({ membreId }) {
 
 // ─── FORMULAIRE MEMBRE ──────────────────────────────────────────
 function FormMembre({ initial, onSave, onClose }) {
-  const { cours, inscriptions, sauvegarderMembre, sauvegarderInscriptions, sauvegarderAbonnement, abonnements } = useData()
+  const { cours, inscriptions, sauvegarderMembre, sauvegarderInscriptions, sauvegarderAbonnement, abonnements, saisonActive } = useData()
   const [form, setForm] = useState(initial || { nom:'', telephone:'', email:'', notes:'' })
   const [inscrits, setInscrits] = useState(
     initial ? inscriptions.filter(i=>i.membre_id===initial.id).map(i=>i.cours_id) : []
@@ -58,10 +58,10 @@ function FormMembre({ initial, onSave, onClose }) {
 
   useEffect(() => {
     if (initial?.id) {
-      const aboActif = abonnements.find(a=>a.membre_id===initial.id&&a.saison==='2025-2026'&&a.statut==='actif')
+      const aboActif = abonnements.find(a=>a.membre_id===initial.id&&a.saison===saisonActive&&a.statut==='actif')
       if (aboActif) setAbo({ type:aboActif.type, date_debut:aboActif.date_debut||'', date_fin:aboActif.date_fin||'', montant:aboActif.montant||'' })
     }
-  }, [initial?.id, abonnements])
+  }, [initial?.id, abonnements, saisonActive])
 
   const datesFin = { 'Annuel':'2026-07-31','Semestriel':'2026-01-31','T1':'2025-12-31','T2':'2026-03-31','T3':'2026-07-31','Seance':'' }
 

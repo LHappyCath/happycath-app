@@ -29,7 +29,7 @@ function fmtDate(d) { return d ? new Date(d + 'T12:00:00').toLocaleDateString('f
 
 // ─── FORMULAIRE : SAISIE GROUPÉE DE CHÈQUES ────────────────────────
 function FormChequesGroupes({ onClose }) {
-  const { membres, cours, creerReglementsGroupes } = useData()
+  const { membres, cours, creerReglementsPersonnalises } = useData()
   const [step, setStep] = useState(1) // 1 = infos générales, 2 = ajustement des lignes
   const [form, setForm] = useState({
     payeur: '', membreId: '', coursId: '', banque: '',
@@ -67,35 +67,9 @@ function FormChequesGroupes({ onClose }) {
 
   async function valider() {
     setSaving(true)
-    // On délègue la génération à creerReglementsGroupes mais avec les lignes potentiellement ajustées :
-    // ici on construit directement les lignes finales (elles ont pu être modifiées à l'étape 2)
-    const nb = lignes.length
-    const groupeId = 'grp' + Date.now().toString(36)
-    const payloadLignes = lignes.map((l, idx) => ({
-      id: 'r' + Date.now().toString(36) + idx,
-      membre_id: form.membreId || null,
-      cours_id: form.coursId || null,
-      payeur: form.payeur,
-      montant: Number(l.montant),
-      mode: 'Chèque',
-      banque: form.banque,
-      numero_cheque: l.numero_cheque,
-      date_encaissement: l.date_encaissement,
-      periodicite: form.periodicite,
-      echeance_num: idx + 1,
-      echeance_total: nb,
-      source: form.source,
-      groupe_id: groupeId,
-      statut: 'en_attente',
-      endosse: false,
-      saison: '2025-2026',
-    }))
-    // Réutilise la logique du store en passant par insert direct (déjà géré côté store pour offline)
-    await creerReglementsGroupes({
+    await creerReglementsPersonnalises(lignes, {
       payeur: form.payeur, membreId: form.membreId, coursId: form.coursId, banque: form.banque,
-      premierNumero: lignes[0]?.numero_cheque, nbCheques: nb,
-      montantParCheque: lignes[0]?.montant, // fallback si aucune ligne n'a été individuellement modifiée
-      premiereDateEncaissement: lignes[0]?.date_encaissement, periodicite: form.periodicite, source: form.source,
+      periodicite: form.periodicite, source: form.source,
     })
     setSaving(false)
     onClose()
