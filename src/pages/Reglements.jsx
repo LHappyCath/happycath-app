@@ -305,11 +305,168 @@ function LigneReglement({ r, coursNom }) {
   )
 }
 
-// ─── PAGE PRINCIPALE ────────────────────────────────────────────────
+// ─── PRÉPARATION DES REMISES DE CHÈQUES ────────────────────────────
+function fmtMoisAnnee(dateStr) {
+  return new Date(dateStr+'T12:00:00').toLocaleDateString('fr-FR', { month:'long', year:'numeric' })
+}
+
+function FormPreparerRemise({ onClose }) {
+  const { reglements, membres, creerRemises } = useData()
+  const [maxParRemise, setMaxParRemise] = useState(25)
+  const [dateRemise, setDateRemise] = useState(new Date().toISOString().slice(0,10))
+  const [saving, setSaving] = useState(false)
+
+  const membreNomDe = (id) => membres.find(m => m.id === id)?.nom || ''
+
+  // Chèques endossés, pas encore affectés à une remise
+  const chequesEligibles = useMemo(() => {
+    return reglements.filter(r => r.mode === 'Chèque' && r.endosse && !r.numero_remise)
+  }, [reglements])
+
+  // Groupe par banque, trie par nom de payeur, puis découpe en lots de taille max
+  const lots = useMemo(() => {
+    const parBanque = {}
+    for (const c of chequesEligibles) {
+      const banque = c.banque || '— Banque non renseignée —'
+      if (!parBanque[banque]) parBanque[banque] = []
+      parBanque[banque].push(c)
+    }
+    const resultat = []
+    for (const [banque, cheques] of Object.entries(parBanque)) {
+      const tries = [...cheques].sort((a,b) => (a.payeur||'').localeCompare(b.payeur||''))
+      for (let i = 0; i < tries.length; i += maxParRemise) {
+        resultat.push({ banque, cheques: tries.slice(i, i + maxParRemise), dateRemise })
+      }
+    }
+    return resultat.sort((a,b) => a.banque.localeCompare(b.banque))
+  }, [chequesEligibles, maxParRemise, dateRemise])
+
+  async function valider() {
+    if (!lots.length) return
+    setSaving(true)
+    const res = await creerRemises(lots)
+    setSaving(false)
+    if (!res.error) onClose()
+  }
+
+  return (
+    <Modal titre="Préparer les remises de chèques" onClose={onClose} wide>
+      <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:16 }}>
+        <div>
+          <label style={LABEL}>Date de remise</label>
+          <input style={INPUT} type="date" value={dateRemise} onChange={e=>setDateRemise(e.target.value)} />
+        </div>
+        <div>
+          <label style={LABEL}>Max de chèques par remise</label>
+          <input style={{ ...INPUT, width:90 }} type="number" min={1} max={50} value={maxParRemise} onChange={e=>setMaxParRemise(Number(e.target.value)||25)} />
+        </div>
+      </div>
+
+      {chequesEligibles.length === 0 ? (
+        <p style={{ fontSize:14, color:'#888' }}>Aucun chèque endossé en attente de remise — tout est déjà remis, ou rien n'est encore endossé.</p>
+      ) : (
+        <div>
+          <p style={{ fontSize:13, color:'#888', marginBottom:14 }}>
+            {chequesEligibles.length} chèque(s) endossé(s) à répartir → {lots.length} remise(s) proposée(s), regroupées par banque, triées par payeur.
+          </p>
+          <div style={{ display:'flex', flexDirection:'column', gap:12, marginBottom:16, maxHeight:440, overflowY:'auto' }}>
+            {lots.map((lot, idx) => {
+              const total = lot.cheques.reduce((s,c)=>s+Number(c.montant||0),0)
+              return (
+                <div key={idx} style={{ background:'#f7f7f8', borderRadius:10, padding:'12px 14px' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                    <span style={{ fontWeight:500 }}>{lot.banque} — {fmtMoisAnnee(dateRemise)}</span>
+                    <span style={{ fontSize:13, color:'#666' }}>{lot.cheques.length} chèque(s) · <strong>{fmtEuros(total)}</strong></span>
+                  </div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
+                    {lot.cheques.map(c => (
+                      <div key={c.id} style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#888', padding:'2px 0' }}>
+                        <span>{c.payeur || membreNomDe(c.membre_id)} — n°{c.numero_cheque}</span>
+                        <span>{fmtEuros(c.montant)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, padding:'10px 14px', background:'rgba(255,0,153,0.06)', borderRadius:10 }}>
+            <span style={{ fontSize:13, color:'#666' }}>Total général</span>
+            <span style={{ fontSize:16, fontWeight:600, color:'#FF0099' }}>{fmtEuros(chequesEligibles.reduce((s,c)=>s+Number(c.montant||0),0))}</span>
+          </div>
+          <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+            <button style={BTN.ghost} onClick={onClose}>Annuler</button>
+            <button style={BTN.primary} disabled={saving} onClick={valider}>{saving ? 'Création…' : `Créer les ${lots.length} remise(s)`}</button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+// ─── VUE REMISES (liste + détail) ───────────────────────────────────
+function VueRemises() {
+  const { remises, reglements, membres, modifierStatutRemise } = useData()
+  const [ouverte, setOuverte] = useState(null)
+  const membreNomDe = (id) => membres.find(m => m.id === id)?.nom || ''
+
+  const STATUTS = { prepare: { label:'Préparée', color:'#BA7517' }, remis: { label:'Déposée en banque', color:'#378ADD' }, encaisse: { label:'Encaissée', color:'#1D9E75' } }
+
+  if (remises.length === 0) {
+    return <p style={{ fontSize:14, color:'#888', textAlign:'center', padding:30 }}>Aucune remise créée pour l'instant.</p>
+  }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+      {remises.map(r => {
+        const cheques = reglements.filter(c => c.numero_remise === r.numero)
+        const st = STATUTS[r.statut] || STATUTS.prepare
+        const ouvert = ouverte === r.numero
+        return (
+          <div key={r.numero} style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:12, padding:'14px 16px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8, cursor:'pointer' }} onClick={()=>setOuverte(ouvert?null:r.numero)}>
+              <div>
+                <p style={{ fontWeight:500, margin:'0 0 3px' }}>{r.numero} — {r.banque}</p>
+                <p style={{ fontSize:12, color:'#888', margin:0 }}>{r.nb_reglements} chèque(s) · {fmtDate(r.date_remise)}</p>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                <span style={{ fontSize:16, fontWeight:600 }}>{fmtEuros(r.montant_total)}</span>
+                <select
+                  value={r.statut}
+                  onClick={e=>e.stopPropagation()}
+                  onChange={e=>modifierStatutRemise(r.numero, e.target.value)}
+                  style={{ fontSize:12, padding:'4px 8px', borderRadius:20, border:'none', background:st.color+'20', color:st.color, fontWeight:500 }}
+                >
+                  <option value="prepare">Préparée</option>
+                  <option value="remis">Déposée en banque</option>
+                  <option value="encaisse">Encaissée</option>
+                </select>
+              </div>
+            </div>
+            {ouvert && (
+              <div style={{ marginTop:12, paddingTop:12, borderTop:'0.5px solid rgba(0,0,0,0.06)', display:'flex', flexDirection:'column', gap:4 }}>
+                {cheques.map(c => (
+                  <div key={c.id} style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#666' }}>
+                    <span>{c.payeur || membreNomDe(c.membre_id)} — n°{c.numero_cheque}</span>
+                    <span>{fmtEuros(c.montant)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+
 export default function Reglements() {
   const { reglements, cours, saisonActive } = useData()
   const [showCheques, setShowCheques] = useState(false)
   const [showSimple, setShowSimple] = useState(false)
+  const [showRemise, setShowRemise] = useState(false)
+  const [ongletVue, setOngletVue] = useState('reglements') // 'reglements' | 'remises'
   const [filtreMode, setFiltreMode] = useState('Tous')
   const [filtreEndossement, setFiltreEndossement] = useState('Tous')
   const [filtreSaison, setFiltreSaison] = useState(saisonActive)
@@ -328,6 +485,7 @@ export default function Reglements() {
 
   const totalAffiche = filtres.reduce((s,r) => s + Number(r.montant||0), 0)
   const nbChequesNonEndosses = reglements.filter(r => r.mode === 'Chèque' && !r.endosse && r.saison === saisonActive).length
+  const nbChequesAffecter = reglements.filter(r => r.mode === 'Chèque' && r.endosse && !r.numero_remise).length
 
   return (
     <div>
@@ -335,9 +493,21 @@ export default function Reglements() {
         <h1 className="page-title">Règlements</h1>
         <div style={{ display:'flex', gap:8 }}>
           <button style={BTN.ghost} onClick={()=>setShowSimple(true)}>+ CB / espèces / virement</button>
+          <button style={BTN.ghost} onClick={()=>setShowRemise(true)}>🏦 Préparer une remise{nbChequesAffecter>0 ? ` (${nbChequesAffecter})` : ''}</button>
           <button style={BTN.primary} onClick={()=>setShowCheques(true)}>+ Chèque(s)</button>
         </div>
       </div>
+
+      <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+        <button onClick={()=>setOngletVue('reglements')} style={{ ...BTN.ghost, ...(ongletVue==='reglements' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Règlements</button>
+        <button onClick={()=>setOngletVue('remises')} style={{ ...BTN.ghost, ...(ongletVue==='remises' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Remises de chèques</button>
+      </div>
+
+      {ongletVue === 'remises' ? (
+        <VueRemises />
+      ) : (
+      <>
+
 
       {nbChequesNonEndosses > 0 && (
         <div style={{ background:'rgba(216,90,48,0.08)', border:'0.5px solid rgba(216,90,48,0.2)', borderRadius:10, padding:'10px 14px', marginBottom:16, fontSize:13, color:'#D85A30' }}>
@@ -384,9 +554,12 @@ export default function Reglements() {
       ) : (
         filtres.map(r => <LigneReglement key={r.id} r={r} coursNom={coursNomDe(r.cours_id)} />)
       )}
+      </>
+      )}
 
       {showCheques && <FormChequesGroupes onClose={()=>setShowCheques(false)} />}
       {showSimple && <FormReglementSimple onClose={()=>setShowSimple(false)} />}
+      {showRemise && <FormPreparerRemise onClose={()=>setShowRemise(false)} />}
     </div>
   )
 }
