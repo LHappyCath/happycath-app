@@ -529,6 +529,42 @@ export function DataProvider({ children }) {
     }
   }
 
+  // Mise à jour en masse des fiches membres (ex: enrichissement depuis un roster SportEasy)
+  async function mettreAJourMembresLot(updates) {
+    if (!updates.length) return { success: true, nb: 0 }
+    try {
+      for (const { id, patch } of updates) {
+        const { error } = await supabase.from('membres').update(patch).eq('id', id)
+        if (error) throw error
+      }
+      setMembres(prev => prev.map(m => {
+        const u = updates.find(u => u.id === m.id)
+        return u ? { ...m, ...u.patch } : m
+      }))
+      return { success: true, nb: updates.length }
+    } catch (e) {
+      return { error: e.message || 'Erreur mise à jour' }
+    }
+  }
+
+  // Mise à jour groupée de fiches membres (ex: import roster stage/adhérents)
+  // patches: [{ id, champs: { telephone, email, ... } }]
+  async function mettreAJourMembres(patches) {
+    try {
+      for (const p of patches) {
+        const { error } = await supabase.from('membres').update(p.champs).eq('id', p.id)
+        if (error) throw error
+      }
+      setMembres(prev => prev.map(m => {
+        const p = patches.find(x => x.id === m.id)
+        return p ? { ...m, ...p.champs } : m
+      }))
+      return { success: true, nb: patches.length }
+    } catch (e) {
+      return { error: e.message || 'Erreur mise à jour' }
+    }
+  }
+
   const value = {
     // Données
     cours, membres, inscriptions, historique, abonnements, reglements, tarifs, parametres, saisonActive,
@@ -537,14 +573,16 @@ export function DataProvider({ children }) {
     loadAll,
     definirSaisonActive,
     sauvegarderAppel,
-    sauvegarderCours, supprimerCours,
-    sauvegarderMembre, archiverMembre,
+    sauvegarderCours, supprimerCours, reactiverCours,
+    sauvegarderMembre, archiverMembre, reactiverMembre,
     sauvegarderInscriptions,
     supprimerAppel,
     sauvegarderAbonnement,
     creerReglementsGroupes, creerReglement, modifierReglement, toggleEndossement, supprimerReglement,
     sauvegarderTarif,
     importerLot,
+    mettreAJourMembres,
+    mettreAJourMembresLot,
     // Utilitaires
     inscritsDuCours: (coursId) => membres.filter(m => inscriptions.some(i => i.cours_id === coursId && i.membre_id === m.id)).sort((a,b) => a.nom.localeCompare(b.nom)),
     coursDuMembre: (membreId) => cours.filter(c => inscriptions.some(i => i.membre_id === membreId && i.cours_id === c.id)),
