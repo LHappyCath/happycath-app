@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useData } from '../lib/store'
 import { lireFichierSportEasy, parserRosterMembres, suggererMembreExistant, CHAMPS_LABELS } from '../lib/sporteasyImport'
@@ -146,18 +146,24 @@ function FormMembre({ initial, onSave, onClose }) {
 
 // ─── FICHE MEMBRE ───────────────────────────────────────────────
 function FicheMembre({ membre, onClose, onEdit, onArchiver }) {
-  const { cours, inscriptions, historique, online, reactiverMembre } = useData()
+  const { cours, inscriptions, historique, online, reactiverMembre, saisonActive } = useData()
   const [stats, setStats] = useState(null)
   const [sessions, setSessions] = useState([])
+  const [filtreSaison, setFiltreSaison] = useState(saisonActive)
+
+  const saisonsDisponibles = useMemo(() => {
+    return [...new Set(historique.map(h => h.saison).filter(Boolean))].sort().reverse()
+  }, [historique])
 
   useEffect(() => {
+    const historiqueFiltre = filtreSaison === 'Toutes' ? historique : historique.filter(h => h.saison === filtreSaison)
     const courIds = inscriptions.filter(i=>i.membre_id===membre.id).map(i=>i.cours_id)
     const toutesLesSessions = []
     let totalSuivis=0, totalManques=0, totalRattrapages=0, derniereDate=null
 
     const statsParCours = courIds.map(cId => {
       const c = cours.find(x=>x.id===cId)
-      const appels = historique.filter(h=>h.cours_id===cId)
+      const appels = historiqueFiltre.filter(h=>h.cours_id===cId)
       let suivis=0, manques=0
       appels.forEach(h => {
         const estPresent = (h.presents||[]).includes(membre.id)
@@ -170,7 +176,7 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver }) {
       return { cours:c, suivis, manques, total:appels.length, taux:appels.length>0?Math.round(suivis/appels.length*100):0 }
     })
 
-    historique.forEach(h => {
+    historiqueFiltre.forEach(h => {
       if (courIds.includes(h.cours_id)) return
       const isRattrapage = (h.guests||[]).some(g=>g.membreId===membre.id&&g.type==='rattrapage')
       if (isRattrapage) {
@@ -184,7 +190,7 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver }) {
     toutesLesSessions.sort((a,b)=>b.date.localeCompare(a.date))
     setStats({ statsParCours, totalSuivis, totalManques, totalRattrapages, derniereDate, solde:Math.max(0,totalManques-totalRattrapages) })
     setSessions(toutesLesSessions)
-  }, [membre.id, cours, inscriptions, historique])
+  }, [membre.id, cours, inscriptions, historique, filtreSaison])
 
   const coul = couleur(membre.id)
 
@@ -222,7 +228,17 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver }) {
       </div>
 
       {stats && <>
-        <p style={{ fontSize:11, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Bilan global</p>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+          <p style={{ fontSize:11, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.07em', margin:0 }}>Bilan {filtreSaison === 'Toutes' ? '(toutes saisons)' : filtreSaison}</p>
+          <select
+            value={filtreSaison}
+            onChange={e=>setFiltreSaison(e.target.value)}
+            style={{ fontSize:12, padding:'4px 8px', borderRadius:6, border:'0.5px solid rgba(0,0,0,0.15)', background:'#fff', color:'#666' }}
+          >
+            {saisonsDisponibles.map(s => <option key={s} value={s}>{s}{s===saisonActive?' (active)':''}</option>)}
+            <option value="Toutes">Toutes les saisons</option>
+          </select>
+        </div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:8, marginBottom:16 }}>
           <div style={{ background:'rgba(255,0,153,0.06)', borderRadius:10, padding:'12px 14px' }}>
             <div style={{ fontSize:22, fontWeight:500, color:'#FF0099', marginBottom:2 }}>{stats.totalSuivis}</div>
@@ -266,7 +282,9 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver }) {
           </div>
         </>}
 
-        <p style={{ fontSize:11, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>Toutes les sessions</p>
+        <p style={{ fontSize:11, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:8 }}>
+          Sessions {filtreSaison === 'Toutes' ? '(toutes saisons)' : `— ${filtreSaison}`}
+        </p>
         <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
           {sessions.slice(0,30).map((s,i) => {
             const dateStr = new Date(s.date+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short'})
