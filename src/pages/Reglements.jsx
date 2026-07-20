@@ -403,6 +403,7 @@ function repartirMois(mois, chequesMois, maxParRemise, remiseExistante) {
 
 function FormPreparerRemise({ onClose }) {
   const { reglements, membres, remises, creerRemises, ajouterChequesRemise } = useData()
+  const [type, setType] = useState('CHQ') // 'CHQ' ou 'ESP'
   const [maxParRemise, setMaxParRemise] = useState(25)
   const [saving, setSaving] = useState(false)
 
@@ -410,26 +411,55 @@ function FormPreparerRemise({ onClose }) {
 
   // Chèques endossés, pas encore affectés à une remise (y compris ceux encaissables dans le futur)
   const chequesEligibles = useMemo(() => {
+    if (type !== 'CHQ') return []
     return reglements.filter(r => r.mode === 'Chèque' && r.endosse && !r.numero_remise && r.date_encaissement)
-  }, [reglements])
+  }, [reglements, type])
 
-  // Regroupe uniquement par MOIS d'encaissement (le max de 20-25 s'applique toutes banques confondues).
-  // À l'intérieur d'une même remise, les chèques restent triés par banque (en blocs) puis par payeur,
-  // pour que la préparation physique (piles par banque, triées alphabétiquement) reste facile.
+  // Espèces pas encore affectées à une remise (pas de notion de banque ni d'endossement)
+  const especesEligibles = useMemo(() => {
+    if (type !== 'ESP') return []
+    return reglements.filter(r => r.mode === 'Espèces' && !r.numero_remise && r.date_encaissement)
+  }, [reglements, type])
+
+  // Regroupe uniquement par MOIS d'encaissement (le max de 20-25 s'applique toutes banques confondues,
+  // pour les chèques uniquement). À l'intérieur d'une même remise, les chèques restent triés par
+  // banque (en blocs) puis par payeur.
   const lots = useMemo(() => {
+    if (type === 'CHQ') {
+      const parMois = {}
+      for (const c of chequesEligibles) {
+        const mois = c.date_encaissement.slice(0, 7)
+        if (!parMois[mois]) parMois[mois] = []
+        parMois[mois].push(c)
+      }
+      const resultat = []
+      for (const [mois, cheques] of Object.entries(parMois)) {
+        const remiseExistante = remises.find(r => r.date_remise?.slice(0,7) === mois && r.statut === 'prepare' && r.type === 'CHQ')
+        resultat.push(...repartirMois(mois, cheques, maxParRemise, remiseExistante).map(l => ({ ...l, type: 'CHQ' })))
+      }
+      return resultat.sort((a,b) => a.mois.localeCompare(b.mois))
+    }
+    // Espèces : un seul dépôt par mois, pas de limite ni de tri par banque
     const parMois = {}
-    for (const c of chequesEligibles) {
-      const mois = c.date_encaissement.slice(0, 7) // 'YYYY-MM'
+    for (const c of especesEligibles) {
+      const mois = c.date_encaissement.slice(0, 7)
       if (!parMois[mois]) parMois[mois] = []
       parMois[mois].push(c)
     }
     const resultat = []
-    for (const [mois, cheques] of Object.entries(parMois)) {
-      const remiseExistante = remises.find(r => r.date_remise?.slice(0,7) === mois && r.statut === 'prepare')
-      resultat.push(...repartirMois(mois, cheques, maxParRemise, remiseExistante))
+    for (const [mois, especes] of Object.entries(parMois)) {
+      const tries = [...especes].sort((a,b) => (a.payeur||'').localeCompare(b.payeur||''))
+      const remiseExistante = remises.find(r => r.date_remise?.slice(0,7) === mois && r.statut === 'prepare' && r.type === 'ESP')
+      if (remiseExistante) {
+        resultat.push({ mode:'ajout', numero: remiseExistante.numero, mois, type:'ESP', banque:'Espèces', cheques: tries })
+      } else {
+        resultat.push({ mode:'creation', mois, dateRemise: mois+'-01', type:'ESP', banque:'Espèces', cheques: tries })
+      }
     }
     return resultat.sort((a,b) => a.mois.localeCompare(b.mois))
-  }, [chequesEligibles, maxParRemise, remises])
+  }, [type, chequesEligibles, especesEligibles, maxParRemise, remises])
+
+  const eligibles = type === 'CHQ' ? chequesEligibles : especesEligibles
 
   async function valider() {
     if (!lots.length) return
@@ -443,24 +473,34 @@ function FormPreparerRemise({ onClose }) {
   }
 
   return (
-    <Modal titre="Préparer les remises de chèques" onClose={onClose} wide>
-      <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:16 }}>
-        <div>
-          <label style={LABEL}>Max de chèques par remise</label>
-          <input style={{ ...INPUT, width:90 }} type="number" min={1} max={50} value={maxParRemise} onChange={e=>setMaxParRemise(Number(e.target.value)||25)} />
-        </div>
+    <Modal titre="Préparer les remises en banque" onClose={onClose} wide>
+      <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+        <button onClick={()=>setType('CHQ')} style={{ ...BTN.ghost, ...(type==='CHQ' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Chèques</button>
+        <button onClick={()=>setType('ESP')} style={{ ...BTN.ghost, ...(type==='ESP' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Espèces</button>
       </div>
+
+      {type === 'CHQ' && (
+        <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:16 }}>
+          <div>
+            <label style={LABEL}>Max de chèques par remise</label>
+            <input style={{ ...INPUT, width:90 }} type="number" min={1} max={50} value={maxParRemise} onChange={e=>setMaxParRemise(Number(e.target.value)||25)} />
+          </div>
+        </div>
+      )}
       <p style={{ fontSize:12, color:'#888', marginTop:-10, marginBottom:16 }}>
-        Le mois de chaque remise correspond au mois d'encaissement écrit sur les chèques — toutes les remises à venir (mois futurs inclus) sont proposées en une fois.
-        Si une remise du même mois/banque est déjà préparée (et pas encore déposée), les nouveaux chèques viennent la compléter au lieu d'en créer une autre.
+        {type === 'CHQ'
+          ? "Le mois de chaque remise correspond au mois d'encaissement écrit sur les chèques — toutes les remises à venir (mois futurs inclus) sont proposées en une fois. Si une remise du même mois est déjà préparée (et pas encore déposée), les nouveaux chèques viennent la compléter."
+          : "Les espèces en attente sont regroupées par mois en une seule remise à déposer."}
       </p>
 
-      {chequesEligibles.length === 0 ? (
-        <p style={{ fontSize:14, color:'#888' }}>Aucun chèque endossé en attente de remise — tout est déjà remis, ou rien n'est encore endossé.</p>
+      {eligibles.length === 0 ? (
+        <p style={{ fontSize:14, color:'#888' }}>
+          {type === 'CHQ' ? "Aucun chèque endossé en attente de remise." : "Aucune espèce en attente de remise."}
+        </p>
       ) : (
         <div>
           <p style={{ fontSize:13, color:'#888', marginBottom:14 }}>
-            {chequesEligibles.length} chèque(s) endossé(s) à répartir → {lots.length} lot(s) proposé(s), classés par mois puis par banque.
+            {eligibles.length} {type === 'CHQ' ? 'chèque(s)' : 'règlement(s) en espèces'} à répartir → {lots.length} lot(s) proposé(s).
           </p>
           <div style={{ display:'flex', flexDirection:'column', gap:12, marginBottom:16, maxHeight:440, overflowY:'auto' }}>
             {lots.map((lot, idx) => {
@@ -469,7 +509,7 @@ function FormPreparerRemise({ onClose }) {
                 <div key={idx} style={{ background:'#f7f7f8', borderRadius:10, padding:'12px 14px' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8, flexWrap:'wrap', gap:6 }}>
                     <span style={{ fontWeight:500 }}>
-                      {fmtMoisAnnee(lot.dateRemise || lot.mois+'-01')} — {lot.banque}
+                      {fmtMoisAnnee(lot.dateRemise || lot.mois+'-01')}{type==='CHQ' ? ` — ${lot.banque}` : ' — Espèces'}
                       {lot.mode === 'ajout' && (
                         <span style={{ marginLeft:8, fontSize:11, fontWeight:500, color:'#378ADD', background:'#378ADD20', borderRadius:10, padding:'2px 8px' }}>
                           + ajout à {lot.numero}
@@ -481,12 +521,12 @@ function FormPreparerRemise({ onClose }) {
                         </span>
                       )}
                     </span>
-                    <span style={{ fontSize:13, color:'#666' }}>{lot.cheques.length} chèque(s) · <strong>{fmtEuros(total)}</strong></span>
+                    <span style={{ fontSize:13, color:'#666' }}>{lot.cheques.length} · <strong>{fmtEuros(total)}</strong></span>
                   </div>
                   <div style={{ display:'flex', flexDirection:'column', gap:2 }}>
                     {lot.cheques.map(c => (
                       <div key={c.id} style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#888', padding:'2px 0' }}>
-                        <span>{c.payeur || membreNomDe(c.membre_id)} — {c.banque || '?'} n°{c.numero_cheque}</span>
+                        <span>{c.payeur || membreNomDe(c.membre_id)}{type==='CHQ' ? ` — ${c.banque || '?'} n°${c.numero_cheque}` : ''}</span>
                         <span>{fmtEuros(c.montant)}</span>
                       </div>
                     ))}
@@ -497,7 +537,7 @@ function FormPreparerRemise({ onClose }) {
           </div>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, padding:'10px 14px', background:'rgba(255,0,153,0.06)', borderRadius:10 }}>
             <span style={{ fontSize:13, color:'#666' }}>Total général</span>
-            <span style={{ fontSize:16, fontWeight:600, color:'#FF0099' }}>{fmtEuros(chequesEligibles.reduce((s,c)=>s+Number(c.montant||0),0))}</span>
+            <span style={{ fontSize:16, fontWeight:600, color:'#FF0099' }}>{fmtEuros(eligibles.reduce((s,c)=>s+Number(c.montant||0),0))}</span>
           </div>
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
             <button style={BTN.ghost} onClick={onClose}>Annuler</button>
@@ -511,7 +551,7 @@ function FormPreparerRemise({ onClose }) {
 
 // ─── VUE REMISES (liste + détail) ───────────────────────────────────
 function VueRemises() {
-  const { remises, reglements, membres, modifierStatutRemise } = useData()
+  const { remises, reglements, membres, modifierStatutRemise, supprimerRemise, retirerChequeRemise } = useData()
   const [ouverte, setOuverte] = useState(null)
   const membreNomDe = (id) => membres.find(m => m.id === id)?.nom || ''
 
@@ -519,6 +559,11 @@ function VueRemises() {
 
   if (remises.length === 0) {
     return <p style={{ fontSize:14, color:'#888', textAlign:'center', padding:30 }}>Aucune remise créée pour l'instant.</p>
+  }
+
+  async function handleSupprimer(numero) {
+    if (!window.confirm(`Supprimer la remise ${numero} ? Les règlements qu'elle contient redeviendront disponibles pour une prochaine remise.`)) return
+    await supprimerRemise(numero)
   }
 
   return (
@@ -535,8 +580,8 @@ function VueRemises() {
           <div key={r.numero} style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:12, padding:'14px 16px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8, cursor:'pointer' }} onClick={()=>setOuverte(ouvert?null:r.numero)}>
               <div>
-                <p style={{ fontWeight:500, margin:'0 0 3px' }}>{r.numero} — {r.banque}</p>
-                <p style={{ fontSize:12, color:'#888', margin:0 }}>{r.nb_reglements} chèque(s) · {fmtDate(r.date_remise)}</p>
+                <p style={{ fontWeight:500, margin:'0 0 3px' }}>{r.numero}</p>
+                <p style={{ fontSize:12, color:'#888', margin:0 }}>{r.nb_reglements} règlement(s) · {fmtDate(r.date_remise)}</p>
               </div>
               <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                 <span style={{ fontSize:16, fontWeight:600 }}>{fmtEuros(r.montant_total)}</span>
@@ -550,16 +595,27 @@ function VueRemises() {
                   <option value="remis">Déposée en banque</option>
                   <option value="encaisse">Encaissée</option>
                 </select>
+                <button onClick={(e)=>{e.stopPropagation(); handleSupprimer(r.numero)}} title="Supprimer la remise"
+                  style={{ background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:15, padding:'2px 4px' }}>🗑</button>
               </div>
             </div>
             {ouvert && (
-              <div style={{ marginTop:12, paddingTop:12, borderTop:'0.5px solid rgba(0,0,0,0.06)', display:'flex', flexDirection:'column', gap:4 }}>
-                {cheques.map(c => (
-                  <div key={c.id} style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'#666' }}>
-                    <span>{c.payeur || membreNomDe(c.membre_id)} — {c.banque || '?'} n°{c.numero_cheque}</span>
-                    <span>{fmtEuros(c.montant)}</span>
-                  </div>
-                ))}
+              <div style={{ marginTop:12, paddingTop:12, borderTop:'0.5px solid rgba(0,0,0,0.06)' }}>
+                {r.type === 'CHQ' && (
+                  <p style={{ fontSize:11, color:'#aaa', margin:'0 0 8px' }}>Banque(s) : {r.banque}</p>
+                )}
+                <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                  {cheques.map(c => (
+                    <div key={c.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:12, color:'#666' }}>
+                      <span>{c.payeur || membreNomDe(c.membre_id)}{r.type==='CHQ' ? ` — ${c.banque || '?'} n°${c.numero_cheque}` : ''}</span>
+                      <span style={{ display:'flex', alignItems:'center', gap:8 }}>
+                        {fmtEuros(c.montant)}
+                        <button onClick={()=>retirerChequeRemise(c.id)} title="Retirer de cette remise"
+                          style={{ background:'none', border:'none', cursor:'pointer', color:'#ddd', fontSize:13 }}>✕</button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -594,7 +650,7 @@ export default function Reglements() {
 
   const totalAffiche = filtres.reduce((s,r) => s + Number(r.montant||0), 0)
   const nbChequesNonEndosses = reglements.filter(r => r.mode === 'Chèque' && !r.endosse && r.saison === saisonActive).length
-  const nbChequesAffecter = reglements.filter(r => r.mode === 'Chèque' && r.endosse && !r.numero_remise).length
+  const nbChequesAffecter = reglements.filter(r => ((r.mode === 'Chèque' && r.endosse) || r.mode === 'Espèces') && !r.numero_remise).length
 
   return (
     <div>
@@ -609,7 +665,7 @@ export default function Reglements() {
 
       <div style={{ display:'flex', gap:8, marginBottom:16 }}>
         <button onClick={()=>setOngletVue('reglements')} style={{ ...BTN.ghost, ...(ongletVue==='reglements' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Règlements</button>
-        <button onClick={()=>setOngletVue('remises')} style={{ ...BTN.ghost, ...(ongletVue==='remises' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Remises de chèques</button>
+        <button onClick={()=>setOngletVue('remises')} style={{ ...BTN.ghost, ...(ongletVue==='remises' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Remises en banque</button>
       </div>
 
       {ongletVue === 'remises' ? (
