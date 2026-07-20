@@ -373,7 +373,6 @@ export function DataProvider({ children }) {
       dateEnc.setMonth(dateEnc.getMonth() + idx * decalageMois)
       const numeroCheque = isNumeric ? String(premierNum + idx) : `${p.premierNumero}-${idx + 1}`
       return {
-        id: 'r' + Date.now().toString(36) + idx,
         membre_id: p.membreId || null,
         cours_id: p.coursId || null,
         payeur: p.payeur,
@@ -415,8 +414,8 @@ export function DataProvider({ children }) {
   // individuels faits à l'écran, contrairement à creerReglementsGroupes qui régénère tout)
   async function creerReglementsPersonnalises(lignes, meta) {
     const groupeId = 'grp' + Date.now().toString(36)
-    const finales = lignes.map((l, idx) => ({
-      id: 'r' + Date.now().toString(36) + idx,
+    // Payload réel envoyé à Supabase : PAS d'id (la colonne est un bigint auto-généré, un id texte est rejeté)
+    const payload = lignes.map((l, idx) => ({
       membre_id: meta.membreId || null,
       cours_id: meta.coursId || null,
       payeur: meta.payeur,
@@ -434,24 +433,28 @@ export function DataProvider({ children }) {
       endosse: false,
       saison: meta.saison || saisonActive,
     }))
+    // Affichage optimiste immédiat avec un id temporaire local (jamais envoyé à Supabase)
+    const temporaires = payload.map((p, i) => ({ ...p, id: `temp-${Date.now()}-${i}` }))
 
-    setReglements(prev => [...finales, ...prev])
-    if (!navigator.onLine) { enqueue({ action: 'insert', table: 'reglements', payload: finales }); return { offline: true, finales } }
+    setReglements(prev => [...temporaires, ...prev])
+    if (!navigator.onLine) { enqueue({ action: 'insert', table: 'reglements', payload }); return { offline: true, finales: temporaires } }
     try {
-      const { error } = await supabase.from('reglements').insert(finales)
+      const { data, error } = await supabase.from('reglements').insert(payload).select()
       if (error) throw error
+      // Remplace les lignes temporaires par les vraies (avec le véritable id renvoyé par Supabase)
+      setReglements(prev => [...data, ...prev.filter(r => !temporaires.some(t => t.id === r.id))])
       const cached = loadCache()
-      if (cached) { cached.reglements = [...finales, ...(cached.reglements||[])]; saveCache(cached) }
-      return { success: true, finales }
+      if (cached) { cached.reglements = [...data, ...(cached.reglements||[])]; saveCache(cached) }
+      return { success: true, finales: data }
     } catch(e) {
       if (!navigator.onLine) {
-        enqueue({ action: 'insert', table: 'reglements', payload: finales })
-        return { queued: true, finales }
+        enqueue({ action: 'insert', table: 'reglements', payload })
+        return { queued: true, finales: temporaires }
       }
       // Vraiment en ligne mais l'enregistrement a échoué (ex: colonne manquante, contrainte...) :
       // on annule l'ajout optimiste local pour ne pas afficher une donnée qui n'est pas réellement enregistrée,
       // et on remonte l'erreur pour qu'elle soit visible plutôt que silencieusement perdue.
-      setReglements(prev => prev.filter(r => !finales.some(f => f.id === r.id)))
+      setReglements(prev => prev.filter(r => !temporaires.some(t => t.id === r.id)))
       console.error('Erreur enregistrement chèques:', e)
       return { error: e.message || "Échec de l'enregistrement des chèques" }
     }
@@ -460,7 +463,6 @@ export function DataProvider({ children }) {
   // Un seul règlement (CB, espèces, virement, ou chèque isolé)
   async function creerReglement(payload) {
     const data = {
-      id: 'r' + Date.now().toString(36),
       statut: payload.mode === 'CB' ? 'encaisse' : 'en_attente',
       endosse: false,
       echeance_num: 1,
@@ -469,7 +471,23 @@ export function DataProvider({ children }) {
       saison: saisonActive,
       ...payload,
     }
-    return insert('reglements', data, () => setReglements(prev => [data, ...prev]), () => setReglements(prev => prev.filter(r => r.id !== data.id)))
+    const temp = { ...data, id: `temp-${Date.now()}` }
+    setReglements(prev => [temp, ...prev])
+    if (!navigator.onLine) { enqueue({ action: 'insert', table: 'reglements', payload: data }); return { offline: true } }
+    try {
+      const { data: saved, error } = await supabase.from('reglements').insert(data).select()
+      if (error) throw error
+      setReglements(prev => [saved[0], ...prev.filter(r => r.id !== temp.id)])
+      return { success: true }
+    } catch(e) {
+      if (!navigator.onLine) {
+        enqueue({ action: 'insert', table: 'reglements', payload: data })
+        return { queued: true }
+      }
+      setReglements(prev => prev.filter(r => r.id !== temp.id))
+      console.error('Erreur enregistrement règlement:', e)
+      return { error: e.message || "Échec de l'enregistrement" }
+    }
   }
 
   async function modifierReglement(id, patch) {
