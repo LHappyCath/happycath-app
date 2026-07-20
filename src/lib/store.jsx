@@ -181,7 +181,7 @@ export function DataProvider({ children }) {
   }
 
   // Upsert générique (insert ou update)
-  async function upsert(table, payload, localUpdate) {
+  async function upsert(table, payload, localUpdate, localRevert) {
     // Mise à jour optimiste locale immédiate
     localUpdate()
     // Mettre à jour le cache
@@ -202,8 +202,13 @@ export function DataProvider({ children }) {
       if (error) throw error
       return { success: true }
     } catch(e) {
-      enqueue({ action: 'upsert', table, payload })
-      return { queued: true }
+      if (!navigator.onLine) {
+        enqueue({ action: 'upsert', table, payload })
+        return { queued: true }
+      }
+      if (localRevert) localRevert()
+      console.error(`Erreur enregistrement ${table}:`, e)
+      return { error: e.message || "Échec de l'enregistrement" }
     }
   }
 
@@ -258,12 +263,14 @@ export function DataProvider({ children }) {
 
   async function sauvegarderCours(payload) {
     const isNew = !payload.id || !cours.find(c => c.id === payload.id)
-    const data = { ...payload, actif: true }
+    const data = { capacite_max: 15, ...payload, actif: true }
 
     if (isNew) {
       return insert('cours', data, () => setCours(prev => [...prev, data].sort((a,b) => a.jour - b.jour || a.heure.localeCompare(b.heure))))
     }
-    return upsert('cours', data, () => setCours(prev => prev.map(c => c.id === data.id ? { ...c, ...data } : c)))
+    const ancien = cours.find(c => c.id === data.id)
+    return upsert('cours', data, () => setCours(prev => prev.map(c => c.id === data.id ? { ...c, ...data } : c)),
+      () => setCours(prev => prev.map(c => c.id === data.id ? ancien : c)))
   }
 
   async function supprimerCours(id) {
