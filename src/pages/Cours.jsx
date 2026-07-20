@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useData } from '../lib/store'
 
@@ -33,15 +33,18 @@ function FormCours({ initial, onSave, onClose }) {
   const { sauvegarderCours } = useData()
   const [form, setForm] = useState(initial || { nom:'', jour:1, heure:'09h00', duree:'60min', coach:'', capacite_max:15 })
   const [saving, setSaving] = useState(false)
+  const [erreur, setErreur] = useState(null)
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
   async function save() {
     if (!form.nom.trim() || !form.coach.trim()) return
     setSaving(true)
+    setErreur(null)
     const id = initial?.id || ('c' + Date.now().toString(36))
-    await sauvegarderCours({ id, ...form, jour:parseInt(form.jour), capacite_max:parseInt(form.capacite_max)||15 })
+    const res = await sauvegarderCours({ id, ...form, jour:parseInt(form.jour), capacite_max:parseInt(form.capacite_max)||15 })
     setSaving(false)
-    onSave()
+    if (res?.error) setErreur(res.error)
+    else onSave()
   }
 
   return (
@@ -66,6 +69,7 @@ function FormCours({ initial, onSave, onClose }) {
         <div><label style={{ fontSize:12, color:'#888', display:'block', marginBottom:4 }}>Places max</label>
           <input style={INPUT} type="number" min="1" max="100" value={form.capacite_max||15} onChange={e=>set('capacite_max',e.target.value)} /></div>
       </div>
+      {erreur && <p style={{ fontSize:13, color:'#D85A30', margin:0 }}>⚠ {erreur}</p>}
       <div style={{ display:'flex', gap:8, paddingTop:4 }}>
         <button style={{ ...BTN.ghost, flex:1 }} onClick={onClose}>Annuler</button>
         <button style={{ ...BTN.primary, flex:2, opacity:saving?0.7:1 }} onClick={save} disabled={saving}>
@@ -77,7 +81,7 @@ function FormCours({ initial, onSave, onClose }) {
 }
 
 // ─── PLANNING ───────────────────────────────────────────────────
-function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditCours, onDeleteCours, onReactiverCours, onNouveauCours, online, archiveMode, toggle }) {
+function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditCours, onDeleteCours, onReactiverCours, onNouveauCours, online, archiveMode, toggle, saisonAffichee }) {
   const aujourdJour = new Date().getDay()
   const [jourActif, setJourActif] = useState(aujourdJour)
   const coursDuJour = [...cours].filter(c=>c.jour===jourActif).sort((a,b)=>a.heure.localeCompare(b.heure))
@@ -113,7 +117,10 @@ function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditC
           <button style={{ ...BTN.outline, fontSize:13 }} onClick={onNouveauCours}>+ Ajouter un cours</button>
         </div>
       ) : coursDuJour.map(c => {
-        const nb = inscriptions.filter(i=>i.cours_id===c.id).length
+        const nb = inscriptions.filter(i=>i.cours_id===c.id && (!saisonAffichee || i.saison===saisonAffichee)).length
+        const maxPlaces = c.capacite_max || 15
+        const taux = Math.round((nb / maxPlaces) * 100)
+        const couleurTaux = taux >= 100 ? '#D85A30' : taux >= 80 ? '#BA7517' : '#1D9E75'
         return (
           <div key={c.id} style={{ background:'#fff', border:`0.5px solid ${jourActif===aujourdJour?'rgba(255,0,153,0.15)':'rgba(0,0,0,0.08)'}`, borderRadius:14, padding:'14px 16px', marginBottom:10 }}>
             <div style={{ display:'flex', alignItems:'flex-start', gap:12 }}>
@@ -123,7 +130,10 @@ function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditC
               </div>
               <div style={{ flex:1 }}>
                 <p style={{ fontSize:15, fontWeight:500, margin:'0 0 3px' }}>{c.nom}</p>
-                <p style={{ fontSize:12, color:'#888', margin:'0 0 10px' }}>{c.coach} · {nb} inscrit{nb!==1?'s':''} / {c.capacite_max||15} places</p>
+                <p style={{ fontSize:12, color:'#888', margin:'0 0 10px' }}>
+                  {c.coach} · {nb} inscrit{nb!==1?'s':''} / {maxPlaces} places
+                  <span style={{ color:couleurTaux, fontWeight:500 }}> ({taux}%)</span>
+                </p>
                 <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
                   {!archiveMode && (
                     <button onClick={()=>onStartAppel(c)} style={{ ...BTN.primary, fontSize:12, padding:'6px 14px' }}>
@@ -424,13 +434,18 @@ function HistoriqueCours({ cours, onRetour, onEditer }) {
 // ─── COMPOSANT PRINCIPAL ────────────────────────────────────────
 export default function Cours() {
   const [searchParams] = useSearchParams()
-  const { cours, inscriptions, sauvegarderAppel, supprimerCours, reactiverCours, online, historique } = useData()
+  const { cours, inscriptions, sauvegarderAppel, supprimerCours, reactiverCours, online, historique, saisonActive } = useData()
   const [vue, setVue] = useState('planning')
   const [coursSelectionne, setCoursSelectionne] = useState(null)
   const [appelExistant, setAppelExistant] = useState(null)
   const [modalCours, setModalCours] = useState(null)
   const [toast, setToast] = useState(null)
   const [voirArchives, setVoirArchives] = useState(false)
+  const [saisonAffichee, setSaisonAffichee] = useState(saisonActive)
+
+  const saisonsDisponibles = useMemo(() => {
+    return [...new Set(inscriptions.map(i => i.saison).filter(Boolean))].sort().reverse()
+  }, [inscriptions])
 
   const coursActifs = cours.filter(c => c.actif !== false)
   const coursArchives = cours.filter(c => c.actif === false)
@@ -477,6 +492,7 @@ export default function Cours() {
       {vue === 'planning' && (
         <Planning cours={voirArchives ? coursArchives : coursActifs} inscriptions={inscriptions} online={online}
           archiveMode={voirArchives}
+          saisonAffichee={saisonAffichee}
           onStartAppel={startAppel}
           onVoirHistorique={c=>{setCoursSelectionne(c);setVue('historique')}}
           onEditCours={c=>setModalCours(c)}
@@ -484,7 +500,7 @@ export default function Cours() {
           onReactiverCours={handleReactiverCours}
           onNouveauCours={()=>setModalCours('nouveau')}
           toggle={
-            <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+            <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap', alignItems:'center' }}>
               <button onClick={()=>setVoirArchives(false)}
                 style={{ ...BTN.ghost, ...(!voirArchives ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>
                 Actifs ({coursActifs.length})
@@ -493,6 +509,11 @@ export default function Cours() {
                 style={{ ...BTN.ghost, ...(voirArchives ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>
                 Archivés ({coursArchives.length})
               </button>
+              <select value={saisonAffichee} onChange={e=>setSaisonAffichee(e.target.value)}
+                style={{ marginLeft:'auto', padding:'8px 12px', borderRadius:8, border:'0.5px solid rgba(0,0,0,0.15)', fontSize:13, background:'#fff', color:'#666' }}>
+                {saisonsDisponibles.map(s => <option key={s} value={s}>Remplissage {s}{s===saisonActive?' (active)':''}</option>)}
+                {!saisonsDisponibles.includes(saisonActive) && <option value={saisonActive}>Remplissage {saisonActive} (active)</option>}
+              </select>
             </div>
           } />
       )}

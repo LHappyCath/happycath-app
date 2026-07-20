@@ -539,7 +539,7 @@ function ImportRoster({ onClose }) {
 export default function Membres() {
   const location = useLocation()
   const membreIdFromNav = location.state?.membreId
-  const { membres, online, archiverMembre } = useData()
+  const { membres, online, archiverMembre, inscriptions, saisonActive, cours } = useData()
   const [search, setSearch] = useState('')
   const [vue, setVue] = useState('liste')
   const [selectedId, setSelectedId] = useState(null)
@@ -570,7 +570,21 @@ export default function Membres() {
 
   const membresActifs = membres.filter(m => m.actif !== false)
   const membresArchives = membres.filter(m => m.actif === false)
-  const base = voirArchives ? membresArchives : membresActifs
+
+  const saisonPrecedente = useMemo(() => {
+    const [a, b] = saisonActive.split('-').map(Number)
+    return `${a-1}-${b-1}`
+  }, [saisonActive])
+
+  const membresNonRenouveles = useMemo(() => {
+    return membresActifs.filter(m => {
+      const inscritAvant = inscriptions.some(i => i.membre_id === m.id && i.saison === saisonPrecedente)
+      const inscritCetteAnnee = inscriptions.some(i => i.membre_id === m.id && i.saison === saisonActive)
+      return inscritAvant && !inscritCetteAnnee
+    })
+  }, [membresActifs, inscriptions, saisonPrecedente, saisonActive])
+
+  const base = voirArchives === 'non-renouveles' ? membresNonRenouveles : voirArchives === true ? membresArchives : membresActifs
 
   const filtered = base.filter(m => {
     const s = search.toLowerCase()
@@ -612,16 +626,21 @@ export default function Membres() {
         <div className="stat-card"><div className="stat-val" style={{ color: !online?'#888':'#1a1a1a' }}>{online?'En ligne':'Hors ligne'}</div><div className="stat-lbl">Statut réseau</div></div>
       </div>
 
-      <div style={{ display:'flex', gap:8, marginBottom:14 }}>
+      <div style={{ display:'flex', gap:8, marginBottom:14, flexWrap:'wrap' }}>
         <button
           onClick={()=>setVoirArchives(false)}
-          style={{ ...BTN.ghost, ...(!voirArchives ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>
+          style={{ ...BTN.ghost, ...(voirArchives===false ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>
           Actifs ({membresActifs.length})
         </button>
         <button
           onClick={()=>setVoirArchives(true)}
-          style={{ ...BTN.ghost, ...(voirArchives ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>
+          style={{ ...BTN.ghost, ...(voirArchives===true ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>
           Archivés ({membresArchives.length})
+        </button>
+        <button
+          onClick={()=>setVoirArchives('non-renouveles')}
+          style={{ ...BTN.ghost, ...(voirArchives==='non-renouveles' ? { background:'#D85A30', color:'#fff', border:'none' } : { color:'#D85A30' }) }}>
+          Non renouvelés {saisonActive} ({membresNonRenouveles.length})
         </button>
       </div>
 
@@ -651,7 +670,11 @@ export default function Membres() {
                 <div style={{ width:36, height:36, borderRadius:'50%', background:coul+'20', color:coul, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:500, flexShrink:0 }}>{initiales(m.nom)}</div>
                 <div style={{ minWidth:0 }}>
                   <p style={{ fontSize:14, fontWeight:500, margin:'0 0 1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.nom}</p>
-                  <p style={{ fontSize:11, color:'#aaa', margin:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.abonnement||'Aucun cours'}</p>
+                  <p style={{ fontSize:11, color:'#aaa', margin:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {voirArchives === 'non-renouveles'
+                      ? `${saisonPrecedente} : ${inscriptions.filter(i=>i.membre_id===m.id&&i.saison===saisonPrecedente).map(i=>cours.find(c=>c.id===i.cours_id)?.nom).filter(Boolean).join(', ') || '—'}`
+                      : (m.abonnement||'Aucun cours')}
+                  </p>
                 </div>
               </div>
               <div style={{ display:'flex', alignItems:'center', gap:4, justifyContent:'center' }}>
