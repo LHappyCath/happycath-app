@@ -146,14 +146,32 @@ function FormMembre({ initial, onSave, onClose }) {
 
 // ─── FICHE MEMBRE ───────────────────────────────────────────────
 function FicheMembre({ membre, onClose, onEdit, onArchiver }) {
-  const { cours, inscriptions, historique, online, reactiverMembre, saisonActive } = useData()
+  const { cours, inscriptions, historique, reglements, online, reactiverMembre, saisonActive } = useData()
   const [stats, setStats] = useState(null)
   const [sessions, setSessions] = useState([])
   const [filtreSaison, setFiltreSaison] = useState(saisonActive)
 
   const saisonsDisponibles = useMemo(() => {
-    return [...new Set(historique.map(h => h.saison).filter(Boolean))].sort().reverse()
-  }, [historique])
+    const s1 = historique.map(h => h.saison)
+    const s2 = reglements.filter(r => r.membre_id === membre.id).map(r => r.saison)
+    return [...new Set([...s1, ...s2].filter(Boolean))].sort().reverse()
+  }, [historique, reglements, membre.id])
+
+  const reglementsMembre = useMemo(() => {
+    return reglements.filter(r => r.membre_id === membre.id && (filtreSaison === 'Toutes' || r.saison === filtreSaison))
+  }, [reglements, membre.id, filtreSaison])
+  const montantPercu = reglementsMembre.reduce((s,r) => s + Number(r.montant||0), 0)
+  const chequesEnAttente = reglementsMembre.filter(r => r.mode === 'Chèque' && r.statut === 'en_attente').reduce((s,r) => s + Number(r.montant||0), 0)
+
+  const montantParSaison = useMemo(() => {
+    const tousLesReglementsMembre = reglements.filter(r => r.membre_id === membre.id)
+    const parSaison = {}
+    for (const r of tousLesReglementsMembre) {
+      const s = r.saison || '—'
+      parSaison[s] = (parSaison[s]||0) + Number(r.montant||0)
+    }
+    return Object.entries(parSaison).sort((a,b) => b[0].localeCompare(a[0]))
+  }, [reglements, membre.id])
 
   useEffect(() => {
     const historiqueFiltre = filtreSaison === 'Toutes' ? historique : historique.filter(h => h.saison === filtreSaison)
@@ -225,6 +243,27 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver }) {
           </div>
         )}
         <AboInfo membreId={membre.id} />
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:10, paddingTop:10, borderTop:'0.5px solid rgba(0,0,0,0.08)' }}>
+          <span style={{ fontSize:12, color:'#888' }}>Montant perçu {filtreSaison === 'Toutes' ? '(toutes saisons)' : `— ${filtreSaison}`}</span>
+          <span style={{ fontSize:16, fontWeight:600, color:'#FF0099' }}>
+            {montantPercu.toLocaleString('fr-FR', { minimumFractionDigits:2, maximumFractionDigits:2 })} €
+          </span>
+        </div>
+        {chequesEnAttente > 0 && (
+          <p style={{ fontSize:11, color:'#BA7517', margin:'4px 0 0' }}>
+            dont {chequesEnAttente.toLocaleString('fr-FR', { minimumFractionDigits:2, maximumFractionDigits:2 })} € de chèque(s) pas encore encaissé(s)
+          </p>
+        )}
+        {montantParSaison.length > 1 && (
+          <div style={{ marginTop:10, paddingTop:10, borderTop:'0.5px solid rgba(0,0,0,0.08)', display:'flex', flexDirection:'column', gap:3 }}>
+            {montantParSaison.map(([saison, montant]) => (
+              <div key={saison} style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'#888' }}>
+                <span>{saison}{saison===saisonActive ? ' (active)' : ''}</span>
+                <span>{montant.toLocaleString('fr-FR', { minimumFractionDigits:2, maximumFractionDigits:2 })} €</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {stats && <>

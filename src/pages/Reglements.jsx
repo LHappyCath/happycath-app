@@ -220,7 +220,7 @@ function FormChequesGroupes({ onClose }) {
 // ─── FORMULAIRE : RÈGLEMENT UNIQUE (CB / espèces / virement) ───────
 function FormReglementSimple({ onClose }) {
   const { membres, cours, creerReglement } = useData()
-  const [form, setForm] = useState({ payeur:'', membreId:'', coursId:'', montant:'', mode:'CB', commentaire:'' })
+  const [form, setForm] = useState({ payeur:'', membreId:'', coursId:'', montant:'', mode:'CB', commentaire:'', dateEncaissement: new Date().toISOString().slice(0,10) })
   const [saving, setSaving] = useState(false)
   const [erreur, setErreur] = useState(null)
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
@@ -232,7 +232,7 @@ function FormReglementSimple({ onClose }) {
     const res = await creerReglement({
       payeur: form.payeur, membre_id: form.membreId || null, cours_id: form.coursId || null,
       montant: Number(form.montant), mode: form.mode, commentaire: form.commentaire,
-      date_encaissement: new Date().toISOString().slice(0,10),
+      date_encaissement: form.dateEncaissement,
     })
     setSaving(false)
     if (res?.error) setErreur(res.error)
@@ -275,6 +275,10 @@ function FormReglementSimple({ onClose }) {
           </div>
         </div>
         <div>
+          <label style={LABEL}>Date d'encaissement</label>
+          <input style={INPUT} type="date" value={form.dateEncaissement} onChange={e=>set('dateEncaissement', e.target.value)} />
+        </div>
+        <div>
           <label style={LABEL}>Commentaire</label>
           <input style={INPUT} value={form.commentaire} onChange={e=>set('commentaire', e.target.value)} />
         </div>
@@ -313,34 +317,32 @@ function LigneReglement({ r, coursNom }) {
   const [confirm, setConfirm] = useState(false)
   const isCheque = r.mode === 'Chèque'
 
+  const detail = [
+    r.mode + (isCheque && r.numero_cheque ? ` n°${r.numero_cheque}` : ''),
+    r.banque,
+    coursNom,
+    fmtDate(r.date_encaissement),
+  ].filter(Boolean).join(' · ')
+
   return (
-    <div style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:12, padding:'12px 16px', marginBottom:8 }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10, flexWrap:'wrap' }}>
-        <div style={{ flex:1, minWidth:180 }}>
-          <p style={{ fontSize:15, fontWeight:500, margin:'0 0 3px' }}>
-            {r.payeur} {r.echeance_total > 1 && <span style={{ fontSize:12, color:'#888', fontWeight:400 }}>· {r.echeance_num}/{r.echeance_total}</span>}
-          </p>
-          <p style={{ fontSize:12, color:'#888', margin:0 }}>
-            {r.mode}{isCheque && r.numero_cheque ? ` n°${r.numero_cheque}` : ''}{r.banque ? ` · ${r.banque}` : ''}{coursNom ? ` · ${coursNom}` : ''}
-          </p>
-          <p style={{ fontSize:12, color:'#aaa', margin:'2px 0 0' }}>Encaissement : {fmtDate(r.date_encaissement)}</p>
-        </div>
-        <div style={{ textAlign:'right' }}>
-          <p style={{ fontSize:16, fontWeight:600, margin:'0 0 6px', color:'#1a1a1a' }}>{fmtEuros(r.montant)}</p>
-          {isCheque && <BadgeEndossement reglement={r} />}
-        </div>
+    <div style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:10, padding:'8px 12px', marginBottom:6, display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+      <div style={{ flex:1, minWidth:160 }}>
+        <span style={{ fontSize:13, fontWeight:500 }}>{r.payeur}</span>
+        {r.echeance_total > 1 && <span style={{ fontSize:11, color:'#888', fontWeight:400 }}> · {r.echeance_num}/{r.echeance_total}</span>}
+        <span style={{ fontSize:11, color:'#aaa' }}> — {detail}</span>
       </div>
-      <div style={{ display:'flex', justifyContent:'flex-end', marginTop:8 }}>
-        {!confirm ? (
-          <button style={{ ...BTN.small, color:'#aaa' }} onClick={()=>setConfirm(true)}>Supprimer</button>
-        ) : (
-          <span style={{ display:'flex', gap:6 }}>
-            <span style={{ fontSize:12, color:'#888', alignSelf:'center' }}>Confirmer ?</span>
-            <button style={{ ...BTN.small, color:'#D85A30' }} onClick={()=>supprimerReglement(r.id)}>Oui</button>
-            <button style={BTN.small} onClick={()=>setConfirm(false)}>Non</button>
-          </span>
-        )}
-      </div>
+      <span style={{ fontSize:14, fontWeight:600, color:'#1a1a1a', whiteSpace:'nowrap' }}>{fmtEuros(r.montant)}</span>
+      {isCheque && <BadgeEndossement reglement={r} />}
+      {!confirm ? (
+        <button onClick={()=>setConfirm(true)} title="Supprimer"
+          style={{ background:'none', border:'none', cursor:'pointer', color:'#ddd', fontSize:14, padding:'2px 4px' }}>🗑</button>
+      ) : (
+        <span style={{ display:'flex', gap:4, alignItems:'center' }}>
+          <span style={{ fontSize:11, color:'#888' }}>Confirmer ?</span>
+          <button style={{ ...BTN.small, padding:'3px 8px', color:'#D85A30' }} onClick={()=>supprimerReglement(r.id)}>Oui</button>
+          <button style={{ ...BTN.small, padding:'3px 8px' }} onClick={()=>setConfirm(false)}>Non</button>
+        </span>
+      )}
     </div>
   )
 }
