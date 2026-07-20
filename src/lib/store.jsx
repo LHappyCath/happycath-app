@@ -643,23 +643,22 @@ export function DataProvider({ children }) {
   // Crée plusieurs remises d'un coup à partir de lots déjà préparés (groupés/triés côté écran)
   // lots: [{ banque, cheques: [reglement, ...], dateRemise }]
   async function creerRemises(lots) {
-    // Numérotation séquentielle par mois (le mois vient de la date d'encaissement des chèques,
-    // pas de la date du jour — permet de préparer plusieurs mois à l'avance en une seule fois)
+    // Numérotation séquentielle courte par type (CHQ / ESP), ex: CHQ-12, ESP-3 — le détail (banques, mois)
+    // reste disponible dans les champs banque/date_remise, pas dans l'identifiant lui-même.
     const compteurs = {}
     const nouvellesRemises = []
     const patchesReglements = []
 
     for (const lot of lots) {
-      const d = new Date(lot.dateRemise+'T12:00:00')
-      const prefixe = `CHQ-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
-      if (!(prefixe in compteurs)) {
-        compteurs[prefixe] = remises.filter(r => r.numero.startsWith(prefixe)).length
+      const type = lot.type || 'CHQ'
+      if (!(type in compteurs)) {
+        compteurs[type] = remises.filter(r => r.type === type).length
       }
-      compteurs[prefixe]++
-      const numero = `${prefixe}-${String(compteurs[prefixe]).padStart(2,'0')}`
+      compteurs[type]++
+      const numero = `${type}-${compteurs[type]}`
       const montantTotal = lot.cheques.reduce((s,c) => s + Number(c.montant||0), 0)
       nouvellesRemises.push({
-        numero, type: 'CHQ', banque: lot.banque, date_remise: lot.dateRemise,
+        numero, type, banque: lot.banque, date_remise: lot.dateRemise,
         montant_total: montantTotal, nb_reglements: lot.cheques.length, statut: 'prepare',
       })
       for (const chq of lot.cheques) {
@@ -718,6 +717,49 @@ export function DataProvider({ children }) {
     }
   }
 
+  // Supprime une remise (les chèques qu'elle contenait redeviennent disponibles pour une prochaine remise)
+  async function supprimerRemise(numero) {
+    try {
+      const { error: e1 } = await supabase.from('reglements').update({ numero_remise: null }).eq('numero_remise', numero)
+      if (e1) throw e1
+      const { error: e2 } = await supabase.from('remises').delete().eq('numero', numero)
+      if (e2) throw e2
+      setRemises(prev => prev.filter(r => r.numero !== numero))
+      setReglements(prev => prev.map(r => r.numero_remise === numero ? { ...r, numero_remise: null } : r))
+      return { success: true }
+    } catch(e) {
+      return { error: e.message || 'Erreur lors de la suppression de la remise' }
+    }
+  }
+
+  // Retire un seul chèque d'une remise (il redevient disponible pour une prochaine remise).
+  // Si la remise devient vide, elle est supprimée automatiquement.
+  async function retirerChequeRemise(chequeId) {
+    const cheque = reglements.find(r => r.id === chequeId)
+    if (!cheque || !cheque.numero_remise) return { error: 'Chèque introuvable ou pas dans une remise' }
+    const numero = cheque.numero_remise
+    const remise = remises.find(r => r.numero === numero)
+    try {
+      const { error: e1 } = await supabase.from('reglements').update({ numero_remise: null }).eq('id', chequeId)
+      if (e1) throw e1
+      setReglements(prev => prev.map(r => r.id === chequeId ? { ...r, numero_remise: null } : r))
+      if (remise && remise.nb_reglements <= 1) {
+        const { error: e2 } = await supabase.from('remises').delete().eq('numero', numero)
+        if (e2) throw e2
+        setRemises(prev => prev.filter(r => r.numero !== numero))
+      } else if (remise) {
+        const nouveauNb = remise.nb_reglements - 1
+        const nouveauTotal = Number(remise.montant_total||0) - Number(cheque.montant||0)
+        const { error: e3 } = await supabase.from('remises').update({ nb_reglements: nouveauNb, montant_total: nouveauTotal }).eq('numero', numero)
+        if (e3) throw e3
+        setRemises(prev => prev.map(r => r.numero === numero ? { ...r, nb_reglements: nouveauNb, montant_total: nouveauTotal } : r))
+      }
+      return { success: true }
+    } catch(e) {
+      return { error: e.message || 'Erreur lors du retrait du chèque' }
+    }
+  }
+
   async function ajouterBanque(nom) {
     const nomPropre = nom.trim()
     if (!nomPropre) return { error: 'Nom vide' }
@@ -756,7 +798,7 @@ export function DataProvider({ children }) {
     loadAll,
     definirSaisonActive,
     ajouterBanque,
-    creerRemises, ajouterChequesRemise, modifierStatutRemise,
+    creerRemises, ajouterChequesRemise, modifierStatutRemise, supprimerRemise, retirerChequeRemise,
     sauvegarderAppel,
     sauvegarderCours, supprimerCours, reactiverCours,
     sauvegarderMembre, archiverMembre, reactiverMembre,
