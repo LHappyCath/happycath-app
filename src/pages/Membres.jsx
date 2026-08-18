@@ -77,7 +77,7 @@ function FormMembre({ initial, onSave, onClose }) {
     onSave()
   }
 
-  const coursByJour = JOURS_FULL.map((j,i)=>({jour:j,idx:i,cours:cours.filter(c=>c.jour===i && c.actif!==false)})).filter(g=>g.cours.length>0)
+  const coursByJour = JOURS_FULL.map((j,i)=>({jour:j,idx:i,cours:cours.filter(c=>c.jour===i && (c.actif!==false || c.ouvert_inscriptions))})).filter(g=>g.cours.length>0)
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:14 }}>

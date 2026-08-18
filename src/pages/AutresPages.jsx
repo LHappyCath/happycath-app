@@ -50,19 +50,6 @@ export function Cours() {
   )
 }
 
-export function Budget() {
-  return (
-    <div>
-      <div className="page-header"><h1 className="page-title">Budget & finances</h1></div>
-      <div className="card" style={{ textAlign:'center', padding:40 }}>
-        <p style={{ fontSize:32, marginBottom:12 }}>📊</p>
-        <p style={{ fontWeight:500, marginBottom:6 }}>Module budget</p>
-        <p style={{ color:'#888', fontSize:14 }}>Prévisionnel, réel, trésorerie, impôt EI — en cours de développement</p>
-      </div>
-    </div>
-  )
-}
-
 export function Factures() {
   return (
     <div>
