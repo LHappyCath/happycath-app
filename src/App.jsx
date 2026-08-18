@@ -7,7 +7,8 @@ import Cours from './pages/Cours'
 import Dashboard from './pages/Dashboard'
 import Reglements from './pages/Reglements'
 import Inscriptions from './pages/Inscriptions'
-import { Budget, Factures } from './pages/AutresPages'
+import Budget from './pages/Budget'
+import { Factures } from './pages/AutresPages'
 import './index.css'
 
 export default function App() {
