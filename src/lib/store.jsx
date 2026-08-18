@@ -39,6 +39,7 @@ export function DataProvider({ children }) {
   const [reglements, setReglements] = useState([])
   const [tarifs, setTarifs] = useState([])
   const [remises, setRemises] = useState([])
+  const [budgetCoursPrevisionnel, setBudgetCoursPrevisionnel] = useState([])
   const [parametres, setParametres] = useState({})
   const [loading, setLoading] = useState(true)
   const [online, setOnline] = useState(navigator.onLine)
@@ -60,6 +61,7 @@ export function DataProvider({ children }) {
         setTarifs(cached.tarifs || [])
         setParametres(cached.parametres || {})
         setRemises(cached.remises || [])
+        setBudgetCoursPrevisionnel(cached.budgetCoursPrevisionnel || [])
       }
       setLoading(false)
       return
@@ -67,7 +69,7 @@ export function DataProvider({ children }) {
 
     try {
       const [
-        { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }
+        { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }, { data: bc }
       ] = await Promise.all([
         supabase.from('cours').select('*').order('jour').order('heure'),
         supabase.from('membres').select('*').order('nom'),
@@ -78,10 +80,11 @@ export function DataProvider({ children }) {
         supabase.from('tarifs').select('*'),
         supabase.from('parametres').select('*'),
         supabase.from('remises').select('*').order('numero', { ascending: false }),
+        supabase.from('budget_cours_previsionnel').select('*'),
       ])
 
       const paramsObj = Object.fromEntries((p||[]).map(x => [x.cle, x.valeur]))
-      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[] }
+      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[] }
       setCours(data.cours)
       setMembres(data.membres)
       setInscriptions(data.inscriptions)
@@ -91,6 +94,7 @@ export function DataProvider({ children }) {
       setTarifs(data.tarifs)
       setParametres(data.parametres)
       setRemises(data.remises)
+      setBudgetCoursPrevisionnel(data.budgetCoursPrevisionnel)
       saveCache(data)
     } catch(e) {
       console.error('loadAll error:', e)
@@ -106,6 +110,7 @@ export function DataProvider({ children }) {
         setTarifs(cached.tarifs || [])
         setParametres(cached.parametres || {})
         setRemises(cached.remises || [])
+        setBudgetCoursPrevisionnel(cached.budgetCoursPrevisionnel || [])
       }
     }
     setLoading(false)
@@ -167,6 +172,7 @@ export function DataProvider({ children }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reglements' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tarifs' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'remises' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_cours_previsionnel' }, loadAll)
       .subscribe()
 
     return () => { if (realtimeSub.current) supabase.removeChannel(realtimeSub.current) }
@@ -289,6 +295,27 @@ export function DataProvider({ children }) {
     setCours(prev => prev.map(c => c.id === id ? { ...c, actif: true } : c))
     const cached = loadCache()
     if (cached) { cached.cours = (cached.cours||[]).map(c => c.id === id ? { ...c, actif: true } : c); saveCache(cached) }
+    return { success: true }
+  }
+
+  // Crée un cours "en préparation" pour une future saison : n'apparaît ni dans
+  // Cours & appel (actif=false) ni comme proposable à l'inscription (ouvert_inscriptions=false)
+  // tant qu'on ne l'active pas explicitement. Utilisé depuis l'écran Budget.
+  async function creerCoursBrouillon(payload) {
+    const id = payload.id || ('c' + Date.now().toString(36))
+    const data = { capacite_max: 15, ...payload, id, actif: false, ouvert_inscriptions: false }
+    const res = await insert('cours', data, () => setCours(prev => [...prev, data]))
+    return { ...res, cours: data }
+  }
+
+  // Ouvre ou referme les inscriptions d'un cours indépendamment de son statut "actif"
+  // (utile pour la période de chevauchement mi-juin → fin de saison en cours).
+  async function toggleOuvertInscriptions(id, ouvert) {
+    if (!navigator.onLine) return { offline: true }
+    await supabase.from('cours').update({ ouvert_inscriptions: ouvert }).eq('id', id)
+    setCours(prev => prev.map(c => c.id === id ? { ...c, ouvert_inscriptions: ouvert } : c))
+    const cached = loadCache()
+    if (cached) { cached.cours = (cached.cours||[]).map(c => c.id === id ? { ...c, ouvert_inscriptions: ouvert } : c); saveCache(cached) }
     return { success: true }
   }
 
@@ -549,6 +576,46 @@ export function DataProvider({ children }) {
     }
   }
 
+  // ─── BUDGET PRÉVISIONNEL RECETTES PAR COURS ──────────────────
+  // Une ligne par (cours, saison). Upsert : crée la ligne si elle n'existe pas encore.
+  async function sauvegarderBudgetCours(payload) {
+    const data = { saison: saisonActive, ...payload }
+    const idx0 = budgetCoursPrevisionnel.findIndex(b => b.cours_id === data.cours_id && b.saison === data.saison)
+    const optimiste = idx0 >= 0 ? { ...budgetCoursPrevisionnel[idx0], ...data } : { id: `temp-${Date.now()}`, ...data }
+    setBudgetCoursPrevisionnel(prev => idx0 >= 0 ? prev.map((b,i) => i===idx0 ? optimiste : b) : [...prev, optimiste])
+
+    if (!navigator.onLine) {
+      enqueue({ action: 'upsert', table: 'budget_cours_previsionnel', payload: data })
+      return { offline: true }
+    }
+    try {
+      const { data: saved, error } = await supabase.from('budget_cours_previsionnel')
+        .upsert(data, { onConflict: 'cours_id,saison' }).select()
+      if (error) throw error
+      setBudgetCoursPrevisionnel(prev => {
+        const idx = prev.findIndex(b => b.cours_id === data.cours_id && b.saison === data.saison)
+        if (idx >= 0) { const n = [...prev]; n[idx] = saved?.[0] || data; return n }
+        return [...prev, saved?.[0] || data]
+      })
+      return { success: true }
+    } catch(e) {
+      enqueue({ action: 'upsert', table: 'budget_cours_previsionnel', payload: data })
+      return { queued: true }
+    }
+  }
+
+  async function supprimerLigneBudget(id) {
+    if (!navigator.onLine) return { offline: true }
+    try {
+      const { error } = await supabase.from('budget_cours_previsionnel').delete().eq('id', id)
+      if (error) throw error
+      setBudgetCoursPrevisionnel(prev => prev.filter(b => b.id !== id))
+      return { success: true }
+    } catch(e) {
+      return { error: e.message || 'Erreur lors de la suppression' }
+    }
+  }
+
   // Import en masse (ex: SportEasy) — ne crée que ce qui n'existe pas déjà
   async function importerLot({ cours: nCours = [], membres: nMembres = [], inscriptions: nInscriptions = [], reglements: nReglements = [] }) {
     const coursIds = new Set(cours.map(c => c.id))
@@ -800,6 +867,7 @@ export function DataProvider({ children }) {
   const value = {
     // Données
     cours, membres, inscriptions, historique, abonnements, reglements, tarifs, parametres, saisonActive, remises, banquesConnues,
+    budgetCoursPrevisionnel,
     loading, online, syncing, queueSize,
     // Actions
     loadAll,
@@ -807,13 +875,14 @@ export function DataProvider({ children }) {
     ajouterBanque,
     creerRemises, ajouterChequesRemise, modifierStatutRemise, supprimerRemise, retirerChequeRemise,
     sauvegarderAppel,
-    sauvegarderCours, supprimerCours, reactiverCours,
+    sauvegarderCours, supprimerCours, reactiverCours, creerCoursBrouillon, toggleOuvertInscriptions,
     sauvegarderMembre, archiverMembre, reactiverMembre,
     sauvegarderInscriptions,
     supprimerAppel,
     sauvegarderAbonnement,
     creerReglementsGroupes, creerReglementsPersonnalises, creerReglement, modifierReglement, toggleEndossement, supprimerReglement,
     sauvegarderTarif,
+    sauvegarderBudgetCours, supprimerLigneBudget,
     importerLot,
     mettreAJourMembres,
     mettreAJourMembresLot,
