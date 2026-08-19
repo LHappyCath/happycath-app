@@ -46,6 +46,9 @@ export function DataProvider({ children }) {
   const [stagiaires, setStagiaires] = useState([])
   const [stageInscriptions, setStageInscriptions] = useState([])
   const [stagePresences, setStagePresences] = useState([])
+  const [budgetPrevisionnel, setBudgetPrevisionnel] = useState([])
+  const [budgetReel, setBudgetReel] = useState([])
+  const [budgetRepartition, setBudgetRepartition] = useState([])
   const [parametres, setParametres] = useState({})
   const [loading, setLoading] = useState(true)
   const [online, setOnline] = useState(navigator.onLine)
@@ -74,6 +77,9 @@ export function DataProvider({ children }) {
         setStagiaires(cached.stagiaires || [])
         setStageInscriptions(cached.stageInscriptions || [])
         setStagePresences(cached.stagePresences || [])
+        setBudgetPrevisionnel(cached.budgetPrevisionnel || [])
+        setBudgetReel(cached.budgetReel || [])
+        setBudgetRepartition(cached.budgetRepartition || [])
       }
       setLoading(false)
       return
@@ -82,7 +88,8 @@ export function DataProvider({ children }) {
     try {
       const [
         { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }, { data: bc }, { data: sc }, { data: je },
-        { data: st }, { data: sg }, { data: si }, { data: sp }
+        { data: st }, { data: sg }, { data: si }, { data: sp },
+        { data: bp }, { data: br }, { data: brp }
       ] = await Promise.all([
         supabase.from('cours').select('*').order('jour').order('heure'),
         supabase.from('membres').select('*').order('nom'),
@@ -100,10 +107,13 @@ export function DataProvider({ children }) {
         supabase.from('stagiaires').select('*').order('nom'),
         supabase.from('stage_inscriptions').select('*'),
         supabase.from('stage_presences').select('*').order('date', { ascending: false }),
+        supabase.from('budget_previsionnel').select('*'),
+        supabase.from('budget_reel').select('*'),
+        supabase.from('budget_repartition_mensuelle').select('*'),
       ])
 
       const paramsObj = Object.fromEntries((p||[]).map(x => [x.cle, x.valeur]))
-      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[] }
+      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[], budgetPrevisionnel: bp||[], budgetReel: br||[], budgetRepartition: brp||[] }
       setCours(data.cours)
       setMembres(data.membres)
       setInscriptions(data.inscriptions)
@@ -120,6 +130,9 @@ export function DataProvider({ children }) {
       setStagiaires(data.stagiaires)
       setStageInscriptions(data.stageInscriptions)
       setStagePresences(data.stagePresences)
+      setBudgetPrevisionnel(data.budgetPrevisionnel)
+      setBudgetReel(data.budgetReel)
+      setBudgetRepartition(data.budgetRepartition)
       saveCache(data)
     } catch(e) {
       console.error('loadAll error:', e)
@@ -142,6 +155,9 @@ export function DataProvider({ children }) {
         setStagiaires(cached.stagiaires || [])
         setStageInscriptions(cached.stageInscriptions || [])
         setStagePresences(cached.stagePresences || [])
+        setBudgetPrevisionnel(cached.budgetPrevisionnel || [])
+        setBudgetReel(cached.budgetReel || [])
+        setBudgetRepartition(cached.budgetRepartition || [])
       }
     }
     setLoading(false)
@@ -210,6 +226,9 @@ export function DataProvider({ children }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stagiaires' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stage_inscriptions' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'stage_presences' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_previsionnel' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_reel' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_repartition_mensuelle' }, loadAll)
       .subscribe()
 
     return () => { if (realtimeSub.current) supabase.removeChannel(realtimeSub.current) }
@@ -764,6 +783,56 @@ export function DataProvider({ children }) {
     })
   }
 
+  // ─── BUDGET MENSUEL (prévisionnel + réel) ─────────────────────
+  // Une ligne = un poste (recette libre ou charge), un montant par mois.
+  // table = 'budget_previsionnel' ou 'budget_reel'.
+  function stateEtSetter(table) {
+    return table === 'budget_reel' ? [budgetReel, setBudgetReel] : [budgetPrevisionnel, setBudgetPrevisionnel]
+  }
+
+  async function sauvegarderLigneBudgetMensuel(table, payload) {
+    const [lignes, setLignes] = stateEtSetter(table)
+    const isNew = !payload.id
+    const data = { saison: saisonActive, entite: 'Asso', ...payload }
+    if (isNew) {
+      const temp = { ...data, id: `temp-${Date.now()}` }
+      return insert(table, data, () => setLignes(prev => [...prev, temp]))
+    }
+    return upsert(table, data, () => setLignes(prev => prev.map(l => l.id === data.id ? { ...l, ...data } : l)))
+  }
+
+  async function supprimerLigneBudgetMensuel(table, id) {
+    const [, setLignes] = stateEtSetter(table)
+    if (!navigator.onLine) return { offline: true }
+    try {
+      const { error } = await supabase.from(table).delete().eq('id', id)
+      if (error) throw error
+      setLignes(prev => prev.filter(l => l.id !== id))
+      return { success: true }
+    } catch(e) {
+      return { error: e.message || 'Erreur lors de la suppression' }
+    }
+  }
+
+  // Clé de répartition mensuelle (%) des recettes cours, une par saison.
+  async function sauvegarderRepartition(saison, valeurs) {
+    const data = { saison, ...valeurs }
+    setBudgetRepartition(prev => {
+      const idx = prev.findIndex(r => r.saison === saison)
+      if (idx >= 0) { const n = [...prev]; n[idx] = { ...n[idx], ...data }; return n }
+      return [...prev, data]
+    })
+    if (!navigator.onLine) { enqueue({ action: 'upsert', table: 'budget_repartition_mensuelle', payload: data }); return { offline: true } }
+    try {
+      const { error } = await supabase.from('budget_repartition_mensuelle').upsert(data, { onConflict: 'saison' })
+      if (error) throw error
+      return { success: true }
+    } catch(e) {
+      enqueue({ action: 'upsert', table: 'budget_repartition_mensuelle', payload: data })
+      return { queued: true }
+    }
+  }
+
   // Import en masse (ex: SportEasy) — ne crée que ce qui n'existe pas déjà
   async function importerLot({ cours: nCours = [], membres: nMembres = [], inscriptions: nInscriptions = [], reglements: nReglements = [] }) {
     const coursIds = new Set(cours.map(c => c.id))
@@ -1017,6 +1086,7 @@ export function DataProvider({ children }) {
     cours, membres, inscriptions, historique, abonnements, reglements, tarifs, parametres, saisonActive, remises, banquesConnues,
     budgetCoursPrevisionnel, saisonsCalendrier, joursExceptionnels,
     stages, stagiaires, stageInscriptions, stagePresences,
+    budgetPrevisionnel, budgetReel, budgetRepartition,
     loading, online, syncing, queueSize,
     // Actions
     loadAll,
@@ -1034,6 +1104,7 @@ export function DataProvider({ children }) {
     sauvegarderBudgetCours, supprimerLigneBudget,
     sauvegarderSaisonCalendrier, sauvegarderJourExceptionnel, supprimerJourExceptionnel,
     sauvegarderStage, archiverStage, sauvegarderStagiaire, inscrireStagiaire, desinscrireStagiaire, sauvegarderPresenceStage,
+    sauvegarderLigneBudgetMensuel, supprimerLigneBudgetMensuel, sauvegarderRepartition,
     importerLot,
     mettreAJourMembres,
     mettreAJourMembresLot,
