@@ -949,8 +949,8 @@ function OngletMensuel({ saison, showToast }) {
 // ─── COMPOSANT PRINCIPAL ────────────────────────────────────────────
 export default function Budget() {
   const { saisonActive, budgetCoursPrevisionnel } = useData()
-  const [saison, setSaison] = useState(saisonSuivante(saisonActive))
-  const [onglet, setOnglet] = useState('recettes')
+  const [saison, setSaison] = useState(saisonActive)
+  const [onglet, setOnglet] = useState('calendrier')
   const [toast, setToast] = useState(null)
 
   function showToast(msg) { setToast(msg); setTimeout(()=>setToast(null), 3000) }
@@ -971,9 +971,9 @@ export default function Budget() {
       </div>
 
       <div style={{ display:'flex', gap:8, marginBottom:16 }}>
-        <button onClick={()=>setOnglet('recettes')} style={{ ...BTN.ghost, ...(onglet==='recettes' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Recettes par cours</button>
-        <button onClick={()=>setOnglet('tarifs')} style={{ ...BTN.ghost, ...(onglet==='tarifs' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Tarifs</button>
         <button onClick={()=>setOnglet('calendrier')} style={{ ...BTN.ghost, ...(onglet==='calendrier' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Calendrier annuel</button>
+        <button onClick={()=>setOnglet('tarifs')} style={{ ...BTN.ghost, ...(onglet==='tarifs' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Tarifs</button>
+        <button onClick={()=>setOnglet('recettes')} style={{ ...BTN.ghost, ...(onglet==='recettes' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Recettes par cours</button>
         <button onClick={()=>setOnglet('mensuel')} style={{ ...BTN.ghost, ...(onglet==='mensuel' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Mensuel</button>
       </div>
 
