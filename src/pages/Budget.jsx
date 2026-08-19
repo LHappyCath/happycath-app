@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, Fragment } from 'react'
 import { useData } from '../lib/store'
 import { joursFeriesSaison, statutJour, compterSeances, joursDuMois, moisDeSaison, MOIS_FR } from '../lib/calendrierScolaire'
 
@@ -657,6 +657,295 @@ function OngletCalendrier({ saison, showToast }) {
   )
 }
 
+// ─── ONGLET MENSUEL (prévisionnel + réel, par mois) ─────────────────
+const MOIS_CLES = ['aout','septembre','octobre','novembre','decembre','janvier','fevrier','mars','avril','mai','juin','juillet']
+const MOIS_COURTS = ['Août','Sept','Oct','Nov','Déc','Janv','Fév','Mars','Avr','Mai','Juin','Juil']
+
+function zerosMois() { return Object.fromEntries(MOIS_CLES.map(m => [m, 0])) }
+function totalLigne(l) { return MOIS_CLES.reduce((s,m) => s + Number(l[m]||0), 0) }
+function totalParMois(lignes) { return MOIS_CLES.map(m => lignes.reduce((s,l) => s + Number(l[m]||0), 0)) }
+
+function fmtEurosSigne(n) {
+  const sign = n < 0 ? '-' : ''
+  return sign + fmtEuros(Math.abs(n))
+}
+
+// Formulaire pour créer une nouvelle ligne libre (recette ou charge)
+function FormLigneBudget({ type, onClose, onCree }) {
+  const [form, setForm] = useState({ categorie:'', libelle:'', entite:'Asso' })
+  const set = (k,v) => setForm(f=>({...f,[k]:v}))
+  return (
+    <Modal titre={type === 'recette' ? 'Nouvelle ligne de recette' : 'Nouvelle ligne de charge'} onClose={onClose}>
+      <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+        <div>
+          <label style={LABEL}>Libellé *</label>
+          <input style={INPUT} value={form.libelle} onChange={e=>set('libelle',e.target.value)} autoFocus
+            placeholder={type==='recette' ? 'ex: Stages, Adhésions...' : 'ex: Loyer, Salaires...'} />
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <div><label style={LABEL}>Catégorie</label>
+            <input style={INPUT} value={form.categorie} onChange={e=>set('categorie',e.target.value)} placeholder="optionnel" /></div>
+          <div><label style={LABEL}>Entité</label>
+            <select style={INPUT} value={form.entite} onChange={e=>set('entite',e.target.value)}>
+              <option value="Asso">Asso</option>
+              <option value="EI">EI</option>
+            </select></div>
+        </div>
+        <div style={{ display:'flex', gap:8, paddingTop:4 }}>
+          <button style={{ ...BTN.ghost, flex:1 }} onClick={onClose}>Annuler</button>
+          <button style={{ ...BTN.primary, flex:2 }} disabled={!form.libelle.trim()}
+            onClick={()=>onCree(form)}>Ajouter</button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// Une ligne éditable (mois par mois) dans un tableau prévisionnel/réel
+function LigneMensuelle({ ligne, onSave, onDelete }) {
+  const [local, setLocal] = useState(() => Object.fromEntries(MOIS_CLES.map(m => [m, ligne[m] ?? 0])))
+  function setMois(m, v) { setLocal(l => ({ ...l, [m]: v })) }
+  function blurMois(m) {
+    const val = parseFloat(local[m]) || 0
+    if (val !== Number(ligne[m]||0)) onSave({ ...ligne, [m]: val })
+  }
+  return (
+    <tr>
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, whiteSpace:'nowrap', position:'sticky', left:0, background:'#fff' }}>
+        {ligne.libelle}
+        {ligne.categorie && <span style={{ color:'#aaa', fontWeight:400 }}> · {ligne.categorie}</span>}
+      </td>
+      {MOIS_CLES.map(m => (
+        <td key={m} style={{ padding:'2px 3px' }}>
+          <input type="number" step="0.01" value={local[m]}
+            onChange={e=>setMois(m, e.target.value)} onBlur={()=>blurMois(m)}
+            style={{ width:64, padding:'5px 6px', borderRadius:6, border:'0.5px solid rgba(0,0,0,0.15)', fontSize:12, textAlign:'right' }} />
+        </td>
+      ))}
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, textAlign:'right', whiteSpace:'nowrap' }}>{fmtEuros(totalLigne(local))}</td>
+      <td style={{ padding:'6px 4px' }}>
+        <button onClick={onDelete} style={{ background:'none', border:'none', cursor:'pointer', color:'#ddd', fontSize:13 }}>🗑</button>
+      </td>
+    </tr>
+  )
+}
+
+// Ligne calculée (lecture seule) pour une catégorie de cours ou un cours en détail
+function LigneCalculee({ libelle, valeurs, sousLigne, fort }) {
+  return (
+    <tr>
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:fort?600:500, color:sousLigne?'#888':'#1a1a1a', paddingLeft:sousLigne?24:8, position:'sticky', left:0, background:'#fff' }}>
+        {libelle}
+      </td>
+      {valeurs.map((v,i) => (
+        <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', color:sousLigne?'#aaa':'#666' }}>{v ? fmtEuros(v) : '—'}</td>
+      ))}
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:fort?700:600, textAlign:'right', whiteSpace:'nowrap' }}>{fmtEuros(valeurs.reduce((s,v)=>s+v,0))}</td>
+      <td />
+    </tr>
+  )
+}
+
+function EnteteTableau({ label }) {
+  return (
+    <thead>
+      <tr>
+        <th style={{ padding:'6px 8px', fontSize:11, fontWeight:500, color:'#888', textAlign:'left', position:'sticky', left:0, background:'#fff' }}>{label}</th>
+        {MOIS_COURTS.map(m => <th key={m} style={{ padding:'6px 4px', fontSize:11, fontWeight:500, color:'#888' }}>{m}</th>)}
+        <th style={{ padding:'6px 8px', fontSize:11, fontWeight:500, color:'#888' }}>Total</th>
+        <th />
+      </tr>
+    </thead>
+  )
+}
+
+function OngletMensuel({ saison, showToast }) {
+  const {
+    cours, budgetCoursPrevisionnel, budgetPrevisionnel, budgetReel, budgetRepartition,
+    sauvegarderLigneBudgetMensuel, supprimerLigneBudgetMensuel, sauvegarderRepartition,
+  } = useData()
+  const [vue, setVue] = useState('previsionnel')
+  const [ouvertes, setOuvertes] = useState({ Gym: false, Danse: false })
+  const [modalLigne, setModalLigne] = useState(null) // 'recette' | 'charge' | null
+
+  const table = vue === 'reel' ? 'budget_reel' : 'budget_previsionnel'
+  const lignesBrutes = (vue === 'reel' ? budgetReel : budgetPrevisionnel).filter(l => l.saison === saison)
+  const lignesRecetteLibres = lignesBrutes.filter(l => l.type === 'recette')
+  const lignesCharges = lignesBrutes.filter(l => l.type === 'charge')
+
+  const repartition = useMemo(() => budgetRepartition.find(r => r.saison === saison) || { saison, ...zerosMois() }, [budgetRepartition, saison])
+  const [repLocal, setRepLocal] = useState(repartition)
+  useEffect(() => { setRepLocal(repartition) }, [saison]) // resynchronise si on change de saison
+
+  const totalRepartition = MOIS_CLES.reduce((s,m) => s + (Number(repLocal[m]) || 0), 0)
+
+  // Recettes cours (Gym/Danse), calculées à partir de la Brique A + répartition
+  const parCategorie = useMemo(() => {
+    const groupes = { Gym: [], Danse: [] }
+    for (const c of cours) {
+      if (c.categorie !== 'Gym' && c.categorie !== 'Danse') continue
+      const budget = budgetCoursPrevisionnel.find(b => b.cours_id === c.id && b.saison === saison)
+      if (!budget) continue
+      const tarif = Number(budget.tarif_prevu ?? c.tarif_plein ?? 0)
+      const ca = (budget.effectif_plein_prevu||0) * tarif + (budget.effectif_reduit_prevu||0) * tarif * 0.9
+      if (!ca) continue
+      const valeurs = MOIS_CLES.map(m => Math.round(ca * (Number(repLocal[m])||0) / 100 * 100) / 100)
+      groupes[c.categorie].push({ nom: c.nom, ca, valeurs })
+    }
+    return groupes
+  }, [cours, budgetCoursPrevisionnel, saison, repLocal])
+
+  async function handleSaveRepartition() {
+    const res = await sauvegarderRepartition(saison, Object.fromEntries(MOIS_CLES.map(m => [m, Number(repLocal[m])||0])))
+    if (res?.error) showToast('Erreur : ' + res.error)
+    else showToast('Répartition enregistrée')
+  }
+
+  async function handleCreerLigne(type, form) {
+    const res = await sauvegarderLigneBudgetMensuel(table, { type, saison, ...form, ...zerosMois() })
+    if (res?.error) showToast('Erreur : ' + res.error)
+    setModalLigne(null)
+  }
+
+  async function handleSaveLigne(ligne) {
+    const res = await sauvegarderLigneBudgetMensuel(table, ligne)
+    if (res?.error) showToast('Erreur : ' + res.error)
+  }
+
+  async function handleDeleteLigne(ligne) {
+    if (!window.confirm(`Supprimer la ligne "${ligne.libelle}" ?`)) return
+    await supprimerLigneBudgetMensuel(table, ligne.id)
+  }
+
+  // Totaux
+  const lignesCoursValeurs = [...parCategorie.Gym, ...parCategorie.Danse].map(l => Object.fromEntries(MOIS_CLES.map((m,i) => [m, l.valeurs[i]])))
+  const totalRecettesMois = vue === 'previsionnel'
+    ? totalParMois([...lignesCoursValeurs, ...lignesRecetteLibres])
+    : totalParMois(lignesRecetteLibres)
+  const totalChargesMois = totalParMois(lignesCharges)
+  const soldeMois = totalRecettesMois.map((r,i) => r - totalChargesMois[i])
+  let cumul = 0
+  const soldeCumule = soldeMois.map(s => (cumul += s))
+
+  // Écart réel vs prévisionnel (indépendant du toggle d'affichage)
+  const lignesRecettePrev = budgetPrevisionnel.filter(l => l.saison === saison && l.type === 'recette')
+  const lignesChargePrev = budgetPrevisionnel.filter(l => l.saison === saison && l.type === 'charge')
+  const lignesRecetteReel = budgetReel.filter(l => l.saison === saison && l.type === 'recette')
+  const lignesChargeReel = budgetReel.filter(l => l.saison === saison && l.type === 'charge')
+  const totalRecettePrev = totalParMois([...lignesCoursValeurs, ...lignesRecettePrev]).reduce((s,v)=>s+v, 0)
+  const totalRecetteReel = lignesRecetteReel.reduce((s,l) => s + totalLigne(l), 0)
+  const totalChargePrev = lignesChargePrev.reduce((s,l) => s + totalLigne(l), 0)
+  const totalChargeReel = lignesChargeReel.reduce((s,l) => s + totalLigne(l), 0)
+
+  return (
+    <div>
+      <p style={{ fontSize:13, color:'#888', marginBottom:16 }}>
+        Budget mensuel (août → juillet) pour la saison <strong>{saison}</strong>. Les recettes Gym/Danse sont calculées automatiquement à partir de "Recettes par cours", réparties sur les mois selon la clé ci-dessous. Le reste (Stages, autres recettes, charges) se saisit librement.
+      </p>
+
+      <div className="card" style={{ padding:16, marginBottom:20 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10, flexWrap:'wrap', gap:8 }}>
+          <p style={{ fontSize:12, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.06em', margin:0 }}>
+            Clé de répartition mensuelle des recettes cours (%)
+          </p>
+          <span style={{ fontSize:12, color: Math.round(totalRepartition)===100 ? '#1D9E75' : '#D85A30' }}>
+            Total : {totalRepartition.toFixed(1)}% {Math.round(totalRepartition)===100 ? '✓' : '(devrait faire 100%)'}
+          </span>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(6, 1fr)', gap:8, marginBottom:10 }}>
+          {MOIS_CLES.map((m,i) => (
+            <div key={m}>
+              <label style={{ ...LABEL, fontSize:10 }}>{MOIS_COURTS[i]}</label>
+              <input type="number" step="0.1" style={INPUT} value={repLocal[m] ?? 0}
+                onChange={e=>setRepLocal(r=>({...r, [m]: e.target.value}))} />
+            </div>
+          ))}
+        </div>
+        <button style={BTN.ghost} onClick={handleSaveRepartition}>Enregistrer la répartition</button>
+      </div>
+
+      <div style={{ display:'flex', gap:8, marginBottom:14 }}>
+        <button onClick={()=>setVue('previsionnel')} style={{ ...BTN.ghost, ...(vue==='previsionnel' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Prévisionnel</button>
+        <button onClick={()=>setVue('reel')} style={{ ...BTN.ghost, ...(vue==='reel' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Réel</button>
+      </div>
+
+      <div style={{ overflowX:'auto', marginBottom:16 }}>
+        <table style={{ borderCollapse:'collapse', width:'100%' }}>
+          <EnteteTableau label="Recettes" />
+          <tbody>
+            {vue === 'previsionnel' && ['Gym','Danse'].map(cat => {
+              const lignes = parCategorie[cat]
+              const valeursCat = MOIS_CLES.map((_,i) => lignes.reduce((s,l) => s + l.valeurs[i], 0))
+              if (lignes.length === 0) return null
+              return (
+                <Fragment key={cat}>
+                  <tr onClick={()=>setOuvertes(o=>({...o,[cat]:!o[cat]}))} style={{ cursor:'pointer', background:'#f7f7f8' }}>
+                    <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8' }}>
+                      {ouvertes[cat] ? '▾' : '▸'} {cat} <span style={{ color:'#aaa', fontWeight:400 }}>({lignes.length})</span>
+                    </td>
+                    {valeursCat.map((v,i) => <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', fontWeight:600 }}>{v ? fmtEuros(v) : '—'}</td>)}
+                    <td style={{ padding:'6px 8px', fontSize:12, fontWeight:700, textAlign:'right' }}>{fmtEuros(valeursCat.reduce((s,v)=>s+v,0))}</td>
+                    <td />
+                  </tr>
+                  {ouvertes[cat] && lignes.map(l => (
+                    <LigneCalculee key={l.nom} libelle={l.nom} valeurs={l.valeurs} sousLigne />
+                  ))}
+                </Fragment>
+              )
+            })}
+            {lignesRecetteLibres.map(l => (
+              <LigneMensuelle key={l.id} ligne={l} onSave={handleSaveLigne} onDelete={()=>handleDeleteLigne(l)} />
+            ))}
+          </tbody>
+        </table>
+        <button style={{ ...BTN.small, marginTop:8 }} onClick={()=>setModalLigne('recette')}>+ Ligne de recette</button>
+      </div>
+
+      <div style={{ overflowX:'auto', marginBottom:16 }}>
+        <table style={{ borderCollapse:'collapse', width:'100%' }}>
+          <EnteteTableau label="Charges" />
+          <tbody>
+            {lignesCharges.map(l => (
+              <LigneMensuelle key={l.id} ligne={l} onSave={handleSaveLigne} onDelete={()=>handleDeleteLigne(l)} />
+            ))}
+          </tbody>
+        </table>
+        <button style={{ ...BTN.small, marginTop:8 }} onClick={()=>setModalLigne('charge')}>+ Ligne de charge</button>
+      </div>
+
+      <div style={{ overflowX:'auto', marginBottom:24 }}>
+        <table style={{ borderCollapse:'collapse', width:'100%' }}>
+          <EnteteTableau label="Solde" />
+          <tbody>
+            <LigneCalculee libelle="Solde du mois" valeurs={soldeMois} fort />
+            <LigneCalculee libelle="Solde cumulé" valeurs={soldeCumule} fort />
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card" style={{ padding:16 }}>
+        <p style={{ fontSize:12, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>
+          Écart réel / prévisionnel — total saison
+        </p>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px,1fr))', gap:12 }}>
+          <div><p style={{ fontSize:11, color:'#888', margin:'0 0 2px' }}>Recettes prévu</p><p style={{ fontSize:15, fontWeight:600, margin:0 }}>{fmtEuros(totalRecettePrev)}</p></div>
+          <div><p style={{ fontSize:11, color:'#888', margin:'0 0 2px' }}>Recettes réel</p><p style={{ fontSize:15, fontWeight:600, margin:0 }}>{fmtEuros(totalRecetteReel)}</p></div>
+          <div><p style={{ fontSize:11, color:'#888', margin:'0 0 2px' }}>Charges prévu</p><p style={{ fontSize:15, fontWeight:600, margin:0 }}>{fmtEuros(totalChargePrev)}</p></div>
+          <div><p style={{ fontSize:11, color:'#888', margin:'0 0 2px' }}>Charges réel</p><p style={{ fontSize:15, fontWeight:600, margin:0 }}>{fmtEuros(totalChargeReel)}</p></div>
+          <div><p style={{ fontSize:11, color:'#888', margin:'0 0 2px' }}>Écart solde</p>
+            <p style={{ fontSize:15, fontWeight:700, margin:0, color: (totalRecetteReel-totalChargeReel) >= (totalRecettePrev-totalChargePrev) ? '#1D9E75' : '#D85A30' }}>
+              {fmtEurosSigne((totalRecetteReel-totalChargeReel) - (totalRecettePrev-totalChargePrev))}
+            </p></div>
+        </div>
+      </div>
+
+      {modalLigne && (
+        <FormLigneBudget type={modalLigne} onClose={()=>setModalLigne(null)} onCree={(form)=>handleCreerLigne(modalLigne, form)} />
+      )}
+    </div>
+  )
+}
+
 // ─── COMPOSANT PRINCIPAL ────────────────────────────────────────────
 export default function Budget() {
   const { saisonActive, budgetCoursPrevisionnel } = useData()
@@ -685,11 +974,13 @@ export default function Budget() {
         <button onClick={()=>setOnglet('recettes')} style={{ ...BTN.ghost, ...(onglet==='recettes' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Recettes par cours</button>
         <button onClick={()=>setOnglet('tarifs')} style={{ ...BTN.ghost, ...(onglet==='tarifs' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Tarifs</button>
         <button onClick={()=>setOnglet('calendrier')} style={{ ...BTN.ghost, ...(onglet==='calendrier' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Calendrier annuel</button>
+        <button onClick={()=>setOnglet('mensuel')} style={{ ...BTN.ghost, ...(onglet==='mensuel' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Mensuel</button>
       </div>
 
       {onglet === 'recettes' && <OngletRecettes saison={saison} showToast={showToast} />}
       {onglet === 'tarifs' && <OngletTarifs saison={saison} showToast={showToast} />}
       {onglet === 'calendrier' && <OngletCalendrier saison={saison} showToast={showToast} />}
+      {onglet === 'mensuel' && <OngletMensuel saison={saison} showToast={showToast} />}
 
       {toast && (
         <div style={{ position:'fixed', bottom:90, left:'50%', transform:'translateX(-50%)', background:'#1a1a1a', color:'#fff', padding:'10px 20px', borderRadius:20, fontSize:14, fontWeight:500, zIndex:400, whiteSpace:'nowrap' }}>
