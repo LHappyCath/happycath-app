@@ -42,6 +42,10 @@ export function DataProvider({ children }) {
   const [budgetCoursPrevisionnel, setBudgetCoursPrevisionnel] = useState([])
   const [saisonsCalendrier, setSaisonsCalendrier] = useState([])
   const [joursExceptionnels, setJoursExceptionnels] = useState([])
+  const [stages, setStages] = useState([])
+  const [stagiaires, setStagiaires] = useState([])
+  const [stageInscriptions, setStageInscriptions] = useState([])
+  const [stagePresences, setStagePresences] = useState([])
   const [parametres, setParametres] = useState({})
   const [loading, setLoading] = useState(true)
   const [online, setOnline] = useState(navigator.onLine)
@@ -66,6 +70,10 @@ export function DataProvider({ children }) {
         setBudgetCoursPrevisionnel(cached.budgetCoursPrevisionnel || [])
         setSaisonsCalendrier(cached.saisonsCalendrier || [])
         setJoursExceptionnels(cached.joursExceptionnels || [])
+        setStages(cached.stages || [])
+        setStagiaires(cached.stagiaires || [])
+        setStageInscriptions(cached.stageInscriptions || [])
+        setStagePresences(cached.stagePresences || [])
       }
       setLoading(false)
       return
@@ -73,7 +81,8 @@ export function DataProvider({ children }) {
 
     try {
       const [
-        { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }, { data: bc }, { data: sc }, { data: je }
+        { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }, { data: bc }, { data: sc }, { data: je },
+        { data: st }, { data: sg }, { data: si }, { data: sp }
       ] = await Promise.all([
         supabase.from('cours').select('*').order('jour').order('heure'),
         supabase.from('membres').select('*').order('nom'),
@@ -87,10 +96,14 @@ export function DataProvider({ children }) {
         supabase.from('budget_cours_previsionnel').select('*'),
         supabase.from('saisons_calendrier').select('*'),
         supabase.from('jours_exceptionnels').select('*'),
+        supabase.from('stages').select('*').order('date_debut'),
+        supabase.from('stagiaires').select('*').order('nom'),
+        supabase.from('stage_inscriptions').select('*'),
+        supabase.from('stage_presences').select('*').order('date', { ascending: false }),
       ])
 
       const paramsObj = Object.fromEntries((p||[]).map(x => [x.cle, x.valeur]))
-      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[] }
+      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[] }
       setCours(data.cours)
       setMembres(data.membres)
       setInscriptions(data.inscriptions)
@@ -103,6 +116,10 @@ export function DataProvider({ children }) {
       setBudgetCoursPrevisionnel(data.budgetCoursPrevisionnel)
       setSaisonsCalendrier(data.saisonsCalendrier)
       setJoursExceptionnels(data.joursExceptionnels)
+      setStages(data.stages)
+      setStagiaires(data.stagiaires)
+      setStageInscriptions(data.stageInscriptions)
+      setStagePresences(data.stagePresences)
       saveCache(data)
     } catch(e) {
       console.error('loadAll error:', e)
@@ -121,6 +138,10 @@ export function DataProvider({ children }) {
         setBudgetCoursPrevisionnel(cached.budgetCoursPrevisionnel || [])
         setSaisonsCalendrier(cached.saisonsCalendrier || [])
         setJoursExceptionnels(cached.joursExceptionnels || [])
+        setStages(cached.stages || [])
+        setStagiaires(cached.stagiaires || [])
+        setStageInscriptions(cached.stageInscriptions || [])
+        setStagePresences(cached.stagePresences || [])
       }
     }
     setLoading(false)
@@ -185,6 +206,10 @@ export function DataProvider({ children }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_cours_previsionnel' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'saisons_calendrier' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'jours_exceptionnels' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stages' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stagiaires' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stage_inscriptions' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stage_presences' }, loadAll)
       .subscribe()
 
     return () => { if (realtimeSub.current) supabase.removeChannel(realtimeSub.current) }
@@ -678,6 +703,67 @@ export function DataProvider({ children }) {
     }
   }
 
+  // ─── STAGES (stagiaires distincts des membres à l'année) ─────
+  async function sauvegarderStage(payload) {
+    const isNew = !payload.id || !stages.find(s => s.id === payload.id)
+    const id = payload.id || ('st' + Date.now().toString(36))
+    const data = { capacite_max: 15, actif: true, saison: saisonActive, ...payload, id }
+    if (isNew) return insert('stages', data, () => setStages(prev => [...prev, data]))
+    return upsert('stages', data, () => setStages(prev => prev.map(s => s.id === data.id ? { ...s, ...data } : s)))
+  }
+
+  async function archiverStage(id) {
+    if (!navigator.onLine) return { offline: true }
+    await supabase.from('stages').update({ actif: false }).eq('id', id)
+    setStages(prev => prev.map(s => s.id === id ? { ...s, actif: false } : s))
+    return { success: true }
+  }
+
+  async function sauvegarderStagiaire(payload) {
+    const isNew = !payload.id || !stagiaires.find(s => s.id === payload.id)
+    const id = payload.id || ('sg' + Date.now().toString(36))
+    const data = { ...payload, id }
+    if (isNew) return insert('stagiaires', data, () => setStagiaires(prev => [...prev, data].sort((a,b) => a.nom.localeCompare(b.nom))))
+    return upsert('stagiaires', data, () => setStagiaires(prev => prev.map(s => s.id === data.id ? { ...s, ...data } : s)))
+  }
+
+  async function inscrireStagiaire(stageId, stagiaireId) {
+    const data = { stage_id: stageId, stagiaire_id: stagiaireId }
+    setStageInscriptions(prev => prev.some(i => i.stage_id === stageId && i.stagiaire_id === stagiaireId) ? prev : [...prev, data])
+    if (!navigator.onLine) { enqueue({ action: 'insert', table: 'stage_inscriptions', payload: data }); return { offline: true } }
+    try {
+      const { error } = await supabase.from('stage_inscriptions').insert(data)
+      if (error && error.code !== '23505') throw error // 23505 = déjà inscrit, on ignore
+      return { success: true }
+    } catch(e) {
+      return { error: e.message }
+    }
+  }
+
+  async function desinscrireStagiaire(stageId, stagiaireId) {
+    setStageInscriptions(prev => prev.filter(i => !(i.stage_id === stageId && i.stagiaire_id === stagiaireId)))
+    if (!navigator.onLine) return { offline: true }
+    try {
+      const { error } = await supabase.from('stage_inscriptions').delete().eq('stage_id', stageId).eq('stagiaire_id', stagiaireId)
+      if (error) throw error
+      return { success: true }
+    } catch(e) {
+      return { error: e.message }
+    }
+  }
+
+  async function sauvegarderPresenceStage(payload) {
+    const { id, stage_id, date, presents } = payload
+    const data = { id, stage_id, date, presents: presents || [] }
+    return upsert('stage_presences', data, () => {
+      setStagePresences(prev => {
+        const idx = prev.findIndex(p => p.id === id)
+        if (idx >= 0) { const n = [...prev]; n[idx] = data; return n }
+        return [data, ...prev]
+      })
+    })
+  }
+
   // Import en masse (ex: SportEasy) — ne crée que ce qui n'existe pas déjà
   async function importerLot({ cours: nCours = [], membres: nMembres = [], inscriptions: nInscriptions = [], reglements: nReglements = [] }) {
     const coursIds = new Set(cours.map(c => c.id))
@@ -930,6 +1016,7 @@ export function DataProvider({ children }) {
     // Données
     cours, membres, inscriptions, historique, abonnements, reglements, tarifs, parametres, saisonActive, remises, banquesConnues,
     budgetCoursPrevisionnel, saisonsCalendrier, joursExceptionnels,
+    stages, stagiaires, stageInscriptions, stagePresences,
     loading, online, syncing, queueSize,
     // Actions
     loadAll,
@@ -946,6 +1033,7 @@ export function DataProvider({ children }) {
     sauvegarderTarif,
     sauvegarderBudgetCours, supprimerLigneBudget,
     sauvegarderSaisonCalendrier, sauvegarderJourExceptionnel, supprimerJourExceptionnel,
+    sauvegarderStage, archiverStage, sauvegarderStagiaire, inscrireStagiaire, desinscrireStagiaire, sauvegarderPresenceStage,
     importerLot,
     mettreAJourMembres,
     mettreAJourMembresLot,
