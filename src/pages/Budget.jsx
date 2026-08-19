@@ -1,7 +1,9 @@
 import { useState, useMemo } from 'react'
 import { useData } from '../lib/store'
+import { joursFeriesSaison, statutJour, compterSeances, joursDuMois, moisDeSaison, MOIS_FR } from '../lib/calendrierScolaire'
 
 const JOURS_FULL = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi']
+const JOURS_COURTS = ['D','L','M','M','J','V','S']
 const CATEGORIES = ['Gym', 'Danse']
 
 const BTN = {
@@ -13,11 +15,8 @@ const INPUT = { width:'100%', padding:'7px 9px', borderRadius:6, border:'0.5px s
 const LABEL = { fontSize:12, fontWeight:500, color:'#666', marginBottom:5, display:'block' }
 
 function fmtEuros(n) { return Number(n||0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' €' }
-
-function saisonSuivante(s) {
-  const [a, b] = s.split('-').map(Number)
-  return `${a+1}-${b+1}`
-}
+function saisonSuivante(s) { const [a, b] = s.split('-').map(Number); return `${a+1}-${b+1}` }
+function defautBornes(saison) { const [a,b] = saison.split('-').map(Number); return { debut: `${a}-09-01`, fin: `${b}-06-30` } }
 
 // Convertit une durée texte ("55min", "1h30", "60 min") en heures décimales.
 function dureeEnHeures(duree) {
@@ -100,7 +99,7 @@ function FormNouveauCours({ onClose, onCree }) {
 }
 
 // ─── LIGNE DE BUDGET (un cours) ─────────────────────────────────────
-function LigneBudget({ cours: c, budget, saison, onChange, onRemove, onCategorieChange }) {
+function LigneBudget({ cours: c, budget, saison, bornes, joursExceptionnelsSaison, onChange, onRemove, onCategorieChange }) {
   const [local, setLocal] = useState({
     nb_seances_prevues: budget?.nb_seances_prevues ?? '',
     effectif_plein_prevu: budget?.effectif_plein_prevu ?? 0,
@@ -111,16 +110,27 @@ function LigneBudget({ cours: c, budget, saison, onChange, onRemove, onCategorie
 
   function set(k, v) { setLocal(l => ({ ...l, [k]: v })) }
 
-  function save() {
+  function save(champsEnPlus) {
     onChange({
       cours_id: c.id,
       saison,
-      nb_seances_prevues: parseInt(local.nb_seances_prevues, 10) || 0,
+      nb_seances_prevues: parseInt(champsEnPlus?.nb_seances_prevues ?? local.nb_seances_prevues, 10) || 0,
       effectif_plein_prevu: parseInt(local.effectif_plein_prevu, 10) || 0,
       effectif_reduit_prevu: parseInt(local.effectif_reduit_prevu, 10) || 0,
       tarif_prevu: Number(local.tarif_prevu) || 0,
       notes: local.notes,
     })
+  }
+
+  function calculerSeances() {
+    if (!bornes?.date_debut || !bornes?.date_fin) return
+    const n = compterSeances({
+      coursJour: c.jour, categorie: c.categorie,
+      dateDebut: bornes.date_debut, dateFin: bornes.date_fin,
+      joursExceptionnels: joursExceptionnelsSaison,
+    })
+    set('nb_seances_prevues', n)
+    save({ nb_seances_prevues: n })
   }
 
   const effectif = (parseInt(local.effectif_plein_prevu,10)||0) + (parseInt(local.effectif_reduit_prevu,10)||0)
@@ -151,20 +161,26 @@ function LigneBudget({ cours: c, budget, saison, onChange, onRemove, onCategorie
           style={{ background:'none', border:'none', cursor:'pointer', color:'#ddd', fontSize:14 }}>🗑</button>
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:8, marginBottom:10 }}>
-        <div><label style={{ ...LABEL, fontSize:11 }}>Séances prévues</label>
-          <input style={INPUT} type="number" min="0" value={local.nb_seances_prevues} onChange={e=>set('nb_seances_prevues', e.target.value)} onBlur={save} /></div>
+      <div style={{ display:'grid', gridTemplateColumns:'1.3fr 1fr 1fr 1fr', gap:8, marginBottom:10 }}>
+        <div>
+          <label style={{ ...LABEL, fontSize:11 }}>Séances prévues</label>
+          <div style={{ display:'flex', gap:4 }}>
+            <input style={INPUT} type="number" min="0" value={local.nb_seances_prevues} onChange={e=>set('nb_seances_prevues', e.target.value)} onBlur={()=>save()} />
+            <button type="button" onClick={calculerSeances} title="Calculer à partir du calendrier"
+              disabled={!c.categorie} style={{ ...BTN.small, padding:'0 8px', opacity:c.categorie?1:0.4 }}>🔄</button>
+          </div>
+        </div>
         <div><label style={{ ...LABEL, fontSize:11 }}>Effectif plein tarif</label>
-          <input style={INPUT} type="number" min="0" value={local.effectif_plein_prevu} onChange={e=>set('effectif_plein_prevu', e.target.value)} onBlur={save} /></div>
+          <input style={INPUT} type="number" min="0" value={local.effectif_plein_prevu} onChange={e=>set('effectif_plein_prevu', e.target.value)} onBlur={()=>save()} /></div>
         <div><label style={{ ...LABEL, fontSize:11 }}>Effectif tarif réduit</label>
-          <input style={INPUT} type="number" min="0" value={local.effectif_reduit_prevu} onChange={e=>set('effectif_reduit_prevu', e.target.value)} onBlur={save} /></div>
+          <input style={INPUT} type="number" min="0" value={local.effectif_reduit_prevu} onChange={e=>set('effectif_reduit_prevu', e.target.value)} onBlur={()=>save()} /></div>
         <div><label style={{ ...LABEL, fontSize:11 }}>Tarif annuel (€)</label>
-          <input style={INPUT} type="number" min="0" step="0.01" value={local.tarif_prevu} onChange={e=>set('tarif_prevu', e.target.value)} onBlur={save} /></div>
+          <input style={INPUT} type="number" min="0" step="0.01" value={local.tarif_prevu} onChange={e=>set('tarif_prevu', e.target.value)} onBlur={()=>save()} /></div>
       </div>
 
       <div>
         <label style={{ ...LABEL, fontSize:11 }}>Inscriptions potentielles / notes</label>
-        <input style={INPUT} value={local.notes} onChange={e=>set('notes', e.target.value)} onBlur={save} placeholder="ex: Charlotte, Elodie (en attente)…" />
+        <input style={INPUT} value={local.notes} onChange={e=>set('notes', e.target.value)} onBlur={()=>save()} placeholder="ex: Charlotte, Elodie (en attente)…" />
       </div>
 
       <div style={{ display:'flex', gap:16, flexWrap:'wrap', marginTop:10, paddingTop:10, borderTop:'0.5px solid #f5f5f5', fontSize:12, color:'#666' }}>
@@ -177,21 +193,18 @@ function LigneBudget({ cours: c, budget, saison, onChange, onRemove, onCategorie
   )
 }
 
-// ─── COMPOSANT PRINCIPAL ────────────────────────────────────────────
-export default function Budget() {
-  const { cours, budgetCoursPrevisionnel, saisonActive, sauvegarderBudgetCours, supprimerLigneBudget, sauvegarderCours } = useData()
-  const [saison, setSaison] = useState(saisonSuivante(saisonActive))
+// ─── ONGLET RECETTES PAR COURS ──────────────────────────────────────
+function OngletRecettes({ saison, showToast }) {
+  const { cours, budgetCoursPrevisionnel, saisonsCalendrier, joursExceptionnels, sauvegarderBudgetCours, supprimerLigneBudget, sauvegarderCours } = useData()
   const [showNouveauCours, setShowNouveauCours] = useState(false)
-  const [toast, setToast] = useState(null)
 
-  function showToast(msg) { setToast(msg); setTimeout(()=>setToast(null), 3000) }
+  const bornes = useMemo(() => {
+    const sc = saisonsCalendrier.find(s => s.saison === saison)
+    return sc ? { date_debut: sc.date_debut, date_fin: sc.date_fin } : { date_debut: defautBornes(saison).debut, date_fin: defautBornes(saison).fin }
+  }, [saisonsCalendrier, saison])
 
-  const saisonsDisponibles = useMemo(() => {
-    const set = new Set([saisonActive, saisonSuivante(saisonActive), ...budgetCoursPrevisionnel.map(b=>b.saison)])
-    return [...set].sort()
-  }, [saisonActive, budgetCoursPrevisionnel])
+  const joursExceptionnelsSaison = useMemo(() => joursExceptionnels.filter(j => j.saison === saison), [joursExceptionnels, saison])
 
-  // Cours à afficher : cours actifs (reconductibles) + cours "brouillon" déjà budgétés pour cette saison
   const coursAffiches = useMemo(() => {
     const idsBudgetes = new Set(budgetCoursPrevisionnel.filter(b => b.saison === saison).map(b => b.cours_id))
     return cours
@@ -256,19 +269,13 @@ export default function Budget() {
 
   return (
     <div>
-      <div className="page-header" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:10 }}>
-        <h1 className="page-title">Budget & finances</h1>
-        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-          <select value={saison} onChange={e=>setSaison(e.target.value)}
-            style={{ padding:'8px 12px', borderRadius:8, border:'0.5px solid rgba(0,0,0,0.15)', fontSize:13, background:'#fff', color:'#666' }}>
-            {saisonsDisponibles.map(s => <option key={s} value={s}>Budget {s}{s===saisonActive?' (saison active)':''}</option>)}
-          </select>
-          <button style={BTN.primary} onClick={()=>setShowNouveauCours(true)}>+ Nouveau cours</button>
-        </div>
+      <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:12 }}>
+        <button style={BTN.primary} onClick={()=>setShowNouveauCours(true)}>+ Nouveau cours</button>
       </div>
 
       <p style={{ fontSize:13, color:'#888', marginBottom:16 }}>
         Prévisionnel des recettes par cours pour la saison <strong>{saison}</strong>. Un cours qu'on ne reconduit pas : laisse simplement ses champs à zéro, pas besoin de le supprimer.
+        Le bouton 🔄 calcule le nombre de séances à partir de l'onglet Calendrier (renseigne d'abord la catégorie du cours).
       </p>
 
       <div className="stats-grid" style={{ marginBottom:20 }}>
@@ -312,6 +319,7 @@ export default function Budget() {
       ) : (
         lignes.map(l => (
           <LigneBudget key={l.cours.id} cours={l.cours} budget={l.budget} saison={saison}
+            bornes={bornes} joursExceptionnelsSaison={joursExceptionnelsSaison}
             onChange={handleChange} onRemove={()=>handleRemove(l)} onCategorieChange={handleCategorieChange} />
         ))
       )}
@@ -320,6 +328,224 @@ export default function Budget() {
         <FormNouveauCours onClose={()=>setShowNouveauCours(false)}
           onCree={()=>{ setShowNouveauCours(false); showToast('Cours créé — renseigne son budget ci-dessous') }} />
       )}
+    </div>
+  )
+}
+
+// ─── FORMULAIRE : PÉRIODE EXCEPTIONNELLE ────────────────────────────
+function FormPeriode({ saison, onClose, showToast }) {
+  const { sauvegarderJourExceptionnel } = useData()
+  const [form, setForm] = useState({ libelle:'', date_debut:'', date_fin:'', statut:'ferme' })
+  const [saving, setSaving] = useState(false)
+  const set = (k,v) => setForm(f=>({...f,[k]:v}))
+
+  async function save() {
+    if (!form.libelle.trim() || !form.date_debut || !form.date_fin) return
+    setSaving(true)
+    const res = await sauvegarderJourExceptionnel({ saison, ...form })
+    setSaving(false)
+    if (res?.error) { showToast('Erreur : ' + res.error); return }
+    onClose()
+  }
+
+  return (
+    <Modal titre="Nouvelle période exceptionnelle" onClose={onClose}>
+      <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+        <div>
+          <label style={LABEL}>Libellé *</label>
+          <input style={INPUT} value={form.libelle} onChange={e=>set('libelle',e.target.value)} placeholder="ex: Fermeture exceptionnelle" autoFocus />
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          <div><label style={LABEL}>Du</label>
+            <input style={INPUT} type="date" value={form.date_debut} onChange={e=>set('date_debut',e.target.value)} /></div>
+          <div><label style={LABEL}>Au</label>
+            <input style={INPUT} type="date" value={form.date_fin} onChange={e=>set('date_fin',e.target.value)} /></div>
+        </div>
+        <div>
+          <label style={LABEL}>Statut</label>
+          <select style={INPUT} value={form.statut} onChange={e=>set('statut',e.target.value)}>
+            <option value="ferme">Fermé (aucun cours)</option>
+            <option value="gym_uniquement">Gym uniquement (danse arrêtée)</option>
+          </select>
+        </div>
+        <div style={{ display:'flex', gap:8, paddingTop:4 }}>
+          <button style={{ ...BTN.ghost, flex:1 }} onClick={onClose}>Annuler</button>
+          <button style={{ ...BTN.primary, flex:2, opacity:saving?0.7:1 }} disabled={saving} onClick={save}>
+            {saving ? 'Enregistrement…' : 'Ajouter'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ─── ONGLET CALENDRIER ANNUEL ────────────────────────────────────────
+function OngletCalendrier({ saison, showToast }) {
+  const { saisonsCalendrier, joursExceptionnels, sauvegarderSaisonCalendrier, sauvegarderJourExceptionnel, supprimerJourExceptionnel } = useData()
+  const [showPeriode, setShowPeriode] = useState(false)
+  const [generation, setGeneration] = useState(false)
+
+  const saisonCal = saisonsCalendrier.find(s => s.saison === saison)
+  const [bornes, setBornes] = useState(() => saisonCal || { date_debut: defautBornes(saison).debut, date_fin: defautBornes(saison).fin })
+
+  const joursExceptionnelsSaison = useMemo(() =>
+    joursExceptionnels.filter(j => j.saison === saison).sort((a,b) => a.date_debut.localeCompare(b.date_debut)),
+    [joursExceptionnels, saison]
+  )
+
+  async function enregistrerBornes() {
+    const res = await sauvegarderSaisonCalendrier(saison, bornes.date_debut, bornes.date_fin)
+    if (res?.error) showToast('Erreur : ' + res.error)
+    else showToast('Bornes de saison enregistrées')
+  }
+
+  async function genererJoursFeries() {
+    setGeneration(true)
+    const feries = joursFeriesSaison(saison)
+    let nb = 0
+    for (const f of feries) {
+      if (statutJour(f.date, joursExceptionnelsSaison) !== 'normal') continue // déjà couvert par une période existante
+      await sauvegarderJourExceptionnel({ saison, date_debut: f.date, date_fin: f.date, libelle: `Jour férié — ${f.libelle}`, statut: 'ferme' })
+      nb++
+    }
+    setGeneration(false)
+    showToast(nb > 0 ? `${nb} jour(s) férié(s) ajouté(s)` : 'Jours fériés déjà à jour')
+  }
+
+  async function supprimer(id) {
+    if (!window.confirm('Supprimer cette période ?')) return
+    await supprimerJourExceptionnel(id)
+  }
+
+  async function changerStatut(j, statut) {
+    await sauvegarderJourExceptionnel({ ...j, statut })
+  }
+
+  const mois = moisDeSaison(saison)
+  const LEGENDE = [
+    { statut:'normal', label:'Normal', couleur:'#fff', bord:'rgba(0,0,0,0.1)' },
+    { statut:'gym_uniquement', label:'Gym uniquement', couleur:'#CCFF0030', bord:'#aad000' },
+    { statut:'ferme', label:'Fermé', couleur:'#E24B4A20', bord:'#E24B4A' },
+  ]
+
+  return (
+    <div>
+      <div className="card" style={{ padding:18, marginBottom:16 }}>
+        <p style={{ fontSize:12, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>
+          Bornes de la saison (utilisées pour calculer le nombre de séances)
+        </p>
+        <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'flex-end' }}>
+          <div><label style={LABEL}>Début</label>
+            <input style={INPUT} type="date" value={bornes.date_debut} onChange={e=>setBornes(b=>({...b, date_debut:e.target.value}))} /></div>
+          <div><label style={LABEL}>Fin</label>
+            <input style={INPUT} type="date" value={bornes.date_fin} onChange={e=>setBornes(b=>({...b, date_fin:e.target.value}))} /></div>
+          <button style={BTN.ghost} onClick={enregistrerBornes}>Enregistrer</button>
+        </div>
+      </div>
+
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:8 }}>
+        <p style={{ fontSize:12, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.06em', margin:0 }}>
+          Périodes exceptionnelles ({joursExceptionnelsSaison.length})
+        </p>
+        <div style={{ display:'flex', gap:8 }}>
+          <button style={BTN.ghost} disabled={generation} onClick={genererJoursFeries}>
+            {generation ? 'Génération…' : '📅 Générer les jours fériés'}
+          </button>
+          <button style={BTN.primary} onClick={()=>setShowPeriode(true)}>+ Période</button>
+        </div>
+      </div>
+
+      <div style={{ display:'flex', flexDirection:'column', gap:6, marginBottom:20 }}>
+        {joursExceptionnelsSaison.map(j => (
+          <div key={j.id} style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:10, padding:'8px 12px', display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+            <span style={{ flex:1, fontSize:13, fontWeight:500, minWidth:160 }}>{j.libelle}</span>
+            <span style={{ fontSize:12, color:'#888' }}>{j.date_debut}{j.date_debut!==j.date_fin ? ` → ${j.date_fin}` : ''}</span>
+            <select value={j.statut} onChange={e=>changerStatut(j, e.target.value)}
+              style={{ fontSize:12, padding:'4px 8px', borderRadius:20, border:'none', background: j.statut==='ferme' ? '#E24B4A20' : '#CCFF0040', color: j.statut==='ferme' ? '#D85A30' : '#3a5000', fontWeight:500 }}>
+              <option value="ferme">Fermé</option>
+              <option value="gym_uniquement">Gym uniquement</option>
+            </select>
+            <button onClick={()=>supprimer(j.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:14 }}>🗑</button>
+          </div>
+        ))}
+        {joursExceptionnelsSaison.length === 0 && <p style={{ fontSize:13, color:'#aaa', textAlign:'center', padding:16 }}>Aucune période saisie — ajoute les vacances scolaires et jours fériés.</p>}
+      </div>
+
+      <div style={{ display:'flex', gap:14, marginBottom:16, flexWrap:'wrap' }}>
+        {LEGENDE.map(l => (
+          <span key={l.statut} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'#666' }}>
+            <span style={{ width:12, height:12, borderRadius:4, background:l.couleur, border:`1px solid ${l.bord}`, display:'inline-block' }} />
+            {l.label}
+          </span>
+        ))}
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:12 }}>
+        {mois.map(({ annee, moisIndex }) => {
+          const jours = joursDuMois(annee, moisIndex, joursExceptionnelsSaison)
+          const decalage = (jours[0].weekday + 6) % 7 // grille lundi→dimanche
+          return (
+            <div key={`${annee}-${moisIndex}`} className="card" style={{ padding:12 }}>
+              <p style={{ fontSize:13, fontWeight:600, margin:'0 0 8px', textAlign:'center' }}>{MOIS_FR[moisIndex]} {annee}</p>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:2, marginBottom:4 }}>
+                {JOURS_COURTS.slice(1).concat(JOURS_COURTS[0]).map((j,i) => (
+                  <span key={i} style={{ fontSize:9, color:'#aaa', textAlign:'center' }}>{j}</span>
+                ))}
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:2 }}>
+                {Array.from({ length: decalage }).map((_,i) => <span key={'d'+i} />)}
+                {jours.map(j => {
+                  const cfg = LEGENDE.find(l => l.statut === j.statut)
+                  return (
+                    <span key={j.date} title={j.date}
+                      style={{ fontSize:10, textAlign:'center', padding:'3px 0', borderRadius:4, background:cfg.couleur, border:`1px solid ${cfg.bord}`, color: j.statut==='normal'?'#666':'#333' }}>
+                      {j.jour}
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {showPeriode && <FormPeriode saison={saison} onClose={()=>setShowPeriode(false)} showToast={showToast} />}
+    </div>
+  )
+}
+
+// ─── COMPOSANT PRINCIPAL ────────────────────────────────────────────
+export default function Budget() {
+  const { saisonActive, budgetCoursPrevisionnel } = useData()
+  const [saison, setSaison] = useState(saisonSuivante(saisonActive))
+  const [onglet, setOnglet] = useState('recettes')
+  const [toast, setToast] = useState(null)
+
+  function showToast(msg) { setToast(msg); setTimeout(()=>setToast(null), 3000) }
+
+  const saisonsDisponibles = useMemo(() => {
+    const set = new Set([saisonActive, saisonSuivante(saisonActive), ...budgetCoursPrevisionnel.map(b=>b.saison)])
+    return [...set].sort()
+  }, [saisonActive, budgetCoursPrevisionnel])
+
+  return (
+    <div>
+      <div className="page-header" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:10 }}>
+        <h1 className="page-title">Budget & finances</h1>
+        <select value={saison} onChange={e=>setSaison(e.target.value)}
+          style={{ padding:'8px 12px', borderRadius:8, border:'0.5px solid rgba(0,0,0,0.15)', fontSize:13, background:'#fff', color:'#666' }}>
+          {saisonsDisponibles.map(s => <option key={s} value={s}>Budget {s}{s===saisonActive?' (saison active)':''}</option>)}
+        </select>
+      </div>
+
+      <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+        <button onClick={()=>setOnglet('recettes')} style={{ ...BTN.ghost, ...(onglet==='recettes' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Recettes par cours</button>
+        <button onClick={()=>setOnglet('calendrier')} style={{ ...BTN.ghost, ...(onglet==='calendrier' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Calendrier annuel</button>
+      </div>
+
+      {onglet === 'recettes'
+        ? <OngletRecettes saison={saison} showToast={showToast} />
+        : <OngletCalendrier saison={saison} showToast={showToast} />}
 
       {toast && (
         <div style={{ position:'fixed', bottom:90, left:'50%', transform:'translateX(-50%)', background:'#1a1a1a', color:'#fff', padding:'10px 20px', borderRadius:20, fontSize:14, fontWeight:500, zIndex:400, whiteSpace:'nowrap' }}>
