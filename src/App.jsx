@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard'
 import Reglements from './pages/Reglements'
 import Inscriptions from './pages/Inscriptions'
 import Budget from './pages/Budget'
+import Stages from './pages/Stages'
 import { Factures } from './pages/AutresPages'
 import './index.css'
 
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="/inscriptions" element={<Inscriptions />} />
             <Route path="/reglements" element={<Reglements />} />
             <Route path="/budget" element={<Budget />} />
+            <Route path="/stages" element={<Stages />} />
             <Route path="/factures" element={<Factures />} />
           </Routes>
         </Layout>
