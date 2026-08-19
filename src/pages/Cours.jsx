@@ -6,6 +6,24 @@ const JOURS_FULL = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Sa
 const JOURS = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam']
 
 function initiales(nom) { return (nom||'').split(' ').map(p=>p[0]).join('').toUpperCase().slice(0,2) }
+function fmtEuros(n) { return Number(n||0).toLocaleString('fr-FR', { maximumFractionDigits: 0 }) + ' €' }
+
+// ─── LIGNE TARIFS (lecture seule, sur la carte du cours) ────────────
+function LigneTarifsCours({ cours: c, tarifs, saison }) {
+  const trouve = (periodicite) => tarifs.find(t => t.cours_id === c.id && t.saison === saison && t.periodicite === periodicite)
+  const items = [
+    { label: 'Annuel', montant: c.tarif_plein },
+    { label: 'Semestre', montant: trouve('Semestriel')?.montant },
+    { label: 'Trimestre', montant: trouve('Trimestriel')?.montant },
+    { label: 'Séance', montant: trouve('Heure')?.montant },
+  ].filter(i => i.montant)
+  if (items.length === 0) return null
+  return (
+    <p style={{ fontSize:11, color:'#aaa', margin:'6px 0 0' }}>
+      💶 {items.map(i => `${i.label} ${fmtEuros(i.montant)}`).join(' · ')}
+    </p>
+  )
+}
 
 const BTN = {
   primary: { padding:'9px 18px', borderRadius:8, border:'none', background:'#FF0099', color:'#fff', cursor:'pointer', fontSize:14, fontWeight:500 },
@@ -81,7 +99,7 @@ function FormCours({ initial, onSave, onClose }) {
 }
 
 // ─── PLANNING ───────────────────────────────────────────────────
-function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditCours, onDeleteCours, onReactiverCours, onNouveauCours, online, archiveMode, toggle, saisonAffichee }) {
+function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditCours, onDeleteCours, onReactiverCours, onNouveauCours, online, archiveMode, toggle, saisonAffichee, tarifs, saisonActive }) {
   const aujourdJour = new Date().getDay()
   const [jourActif, setJourActif] = useState(aujourdJour)
   const coursDuJour = [...cours].filter(c=>c.jour===jourActif).sort((a,b)=>a.heure.localeCompare(b.heure))
@@ -134,7 +152,8 @@ function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditC
                   {c.coach} · {nb} inscrit{nb!==1?'s':''} / {maxPlaces} places
                   <span style={{ color:couleurTaux, fontWeight:500 }}> ({taux}%)</span>
                 </p>
-                <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                <LigneTarifsCours cours={c} tarifs={tarifs} saison={saisonActive} />
+                <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginTop:8 }}>
                   {!archiveMode && (
                     <button onClick={()=>onStartAppel(c)} style={{ ...BTN.primary, fontSize:12, padding:'6px 14px' }}>
                       {jourActif===aujourdJour ? "Faire l'appel" : 'Appel rétroactif'}
@@ -434,7 +453,7 @@ function HistoriqueCours({ cours, onRetour, onEditer }) {
 // ─── COMPOSANT PRINCIPAL ────────────────────────────────────────
 export default function Cours() {
   const [searchParams] = useSearchParams()
-  const { cours, inscriptions, sauvegarderAppel, supprimerCours, reactiverCours, online, historique, saisonActive } = useData()
+  const { cours, inscriptions, sauvegarderAppel, supprimerCours, reactiverCours, online, historique, saisonActive, tarifs } = useData()
   const [vue, setVue] = useState('planning')
   const [coursSelectionne, setCoursSelectionne] = useState(null)
   const [appelExistant, setAppelExistant] = useState(null)
@@ -493,6 +512,7 @@ export default function Cours() {
         <Planning cours={voirArchives ? coursArchives : coursActifs} inscriptions={inscriptions} online={online}
           archiveMode={voirArchives}
           saisonAffichee={saisonAffichee}
+          tarifs={tarifs} saisonActive={saisonActive}
           onStartAppel={startAppel}
           onVoirHistorique={c=>{setCoursSelectionne(c);setVue('historique')}}
           onEditCours={c=>setModalCours(c)}
