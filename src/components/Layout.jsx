@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { to: '/',           icon: '🏠', label: 'Accueil',         section: null },
   { to: '/dashboard',  icon: '📈', label: 'Tableau de bord', section: null },
   { to: '/cours',      icon: '📋', label: 'Cours & appel',   section: 'Terrain' },
+  { to: '/stages',     icon: '🏕️', label: 'Stages',          section: 'Terrain' },
   { to: '/membres',      icon: '👥', label: 'Membres',         section: null },
   { to: '/inscriptions', icon: '📥', label: 'Inscriptions',    section: 'Gestion' },
   { to: '/reglements',   icon: '💶', label: 'Règlements',      section: null },
@@ -16,6 +17,7 @@ const BOTTOM_NAV = [
   { to: '/',          icon: '🏠', label: 'Accueil' },
   { to: '/dashboard', icon: '📈', label: 'Stats' },
   { to: '/cours',     icon: '📋', label: 'Cours' },
+  { to: '/stages',    icon: '🏕️', label: 'Stages' },
   { to: '/membres',   icon: '👥', label: 'Membres' },
   { to: '/budget',    icon: '📊', label: 'Budget' },
 ]
