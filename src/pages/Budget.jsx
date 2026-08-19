@@ -379,6 +379,123 @@ function FormPeriode({ saison, onClose, showToast }) {
   )
 }
 
+// ─── ONGLET TARIFS ───────────────────────────────────────────────────
+const PERIODICITES_DECLINEES = [
+  { cle: 'Semestriel', diviseur: 2, champMajoration: 'majoration_semestriel' },
+  { cle: 'Trimestriel', diviseur: 3, champMajoration: 'majoration_trimestriel' },
+  { cle: 'Heure', diviseur: null, champMajoration: 'majoration_heure' }, // diviseur = nb séances prévues
+]
+
+function LigneTarif({ cours: c, tarifAnnuel, nbSeancesPrevues, tarifsExistants, onMajorationChange, onMontantCalcule }) {
+  const [majorations, setMajorations] = useState({
+    majoration_semestriel: c.majoration_semestriel ?? 0,
+    majoration_trimestriel: c.majoration_trimestriel ?? 0,
+    majoration_heure: c.majoration_heure ?? 0,
+  })
+
+  function calculerMontant(p) {
+    if (!tarifAnnuel) return null
+    const diviseur = p.cle === 'Heure' ? nbSeancesPrevues : p.diviseur
+    if (!diviseur) return null
+    const majoration = Number(majorations[p.champMajoration]) || 0
+    return (tarifAnnuel / diviseur) * (1 + majoration / 100)
+  }
+
+  function handleMajorationChange(champ, valeur) {
+    setMajorations(m => ({ ...m, [champ]: valeur }))
+  }
+
+  function handleBlur(p) {
+    onMajorationChange(c.id, p.champMajoration, Number(majorations[p.champMajoration]) || 0)
+    const montant = calculerMontant(p)
+    if (montant !== null) onMontantCalcule(c.id, p.cle, montant)
+  }
+
+  return (
+    <div style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:12, padding:'12px 14px', marginBottom:8 }}>
+      <div style={{ display:'flex', alignItems:'baseline', gap:10, marginBottom:10, flexWrap:'wrap' }}>
+        <p style={{ fontSize:14, fontWeight:500, margin:0, flex:1, minWidth:160 }}>{c.nom}</p>
+        <span style={{ fontSize:12, color:'#888' }}>{JOURS_FULL[c.jour]} {c.heure}</span>
+        <span style={{ fontSize:13, fontWeight:600, color:'#FF0099' }}>Annuel : {tarifAnnuel ? fmtEuros(tarifAnnuel) : '— (non défini dans Recettes par cours)'}</span>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10 }}>
+        {PERIODICITES_DECLINEES.map(p => {
+          const montant = calculerMontant(p)
+          const existant = tarifsExistants.find(t => t.periodicite === p.cle)
+          const diviseurAffiche = p.cle === 'Heure' ? nbSeancesPrevues : p.diviseur
+          return (
+            <div key={p.cle} style={{ background:'#f7f7f8', borderRadius:10, padding:'10px 12px' }}>
+              <p style={{ fontSize:12, fontWeight:500, margin:'0 0 6px' }}>{p.cle === 'Heure' ? 'À la séance' : p.cle}</p>
+              <label style={{ ...LABEL, fontSize:10 }}>Majoration (%)</label>
+              <input style={{ ...INPUT, marginBottom:6 }} type="number" step="0.1"
+                value={majorations[p.champMajoration]}
+                onChange={e=>handleMajorationChange(p.champMajoration, e.target.value)}
+                onBlur={()=>handleBlur(p)} />
+              {!diviseurAffiche && p.cle === 'Heure' && (
+                <p style={{ fontSize:11, color:'#D85A30', margin:0 }}>Séances prévues manquantes (onglet Recettes)</p>
+              )}
+              {montant !== null && (
+                <p style={{ fontSize:14, fontWeight:600, margin:0, color:'#1a1a1a' }}>{fmtEuros(montant)}</p>
+              )}
+              {existant && Math.round(existant.montant) !== Math.round(montant||0) && (
+                <p style={{ fontSize:10, color:'#aaa', margin:'2px 0 0' }}>enregistré : {fmtEuros(existant.montant)}</p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function OngletTarifs({ saison, showToast }) {
+  const { cours, budgetCoursPrevisionnel, tarifs, sauvegarderCours, sauvegarderTarif } = useData()
+
+  const coursAffiches = useMemo(() => {
+    const idsBudgetes = new Set(budgetCoursPrevisionnel.filter(b => b.saison === saison).map(b => b.cours_id))
+    return cours
+      .filter(c => c.actif !== false || idsBudgetes.has(c.id))
+      .sort((a,b) => (a.jour - b.jour) || (a.heure||'').localeCompare(b.heure||''))
+  }, [cours, budgetCoursPrevisionnel, saison])
+
+  async function handleMajorationChange(coursId, champ, valeur) {
+    const c = cours.find(x => x.id === coursId)
+    if (!c) return
+    await sauvegarderCours({ ...c, [champ]: valeur })
+  }
+
+  async function handleMontantCalcule(coursId, periodicite, montant) {
+    const res = await sauvegarderTarif({ cours_id: coursId, periodicite, saison, montant: Math.round(montant * 100) / 100 })
+    if (res?.error) showToast('Erreur : ' + res.error)
+  }
+
+  return (
+    <div>
+      <p style={{ fontSize:13, color:'#888', marginBottom:16 }}>
+        Tarifs déclinés pour la saison <strong>{saison}</strong>, à partir du tarif annuel défini dans "Recettes par cours".
+        Le tarif "Annuel" par défilement de tarif réduit famille/multi-cours reste géré ailleurs (règlements) — ici, uniquement les déclinaisons Semestriel / Trimestriel / à la séance, avec une majoration modifiable cours par cours (0% = simple division du tarif annuel).
+      </p>
+      {coursAffiches.length === 0 ? (
+        <div className="card" style={{ textAlign:'center', padding:40 }}>
+          <p style={{ color:'#888', fontSize:14 }}>Aucun cours pour cette saison.</p>
+        </div>
+      ) : (
+        coursAffiches.map(c => {
+          const budget = budgetCoursPrevisionnel.find(b => b.cours_id === c.id && b.saison === saison)
+          const tarifAnnuel = Number(budget?.tarif_prevu ?? c.tarif_plein ?? 0) || null
+          const nbSeancesPrevues = budget?.nb_seances_prevues || null
+          const tarifsExistants = tarifs.filter(t => t.cours_id === c.id && t.saison === saison)
+          return (
+            <LigneTarif key={c.id} cours={c} tarifAnnuel={tarifAnnuel} nbSeancesPrevues={nbSeancesPrevues}
+              tarifsExistants={tarifsExistants}
+              onMajorationChange={handleMajorationChange} onMontantCalcule={handleMontantCalcule} />
+          )
+        })
+      )}
+    </div>
+  )
+}
+
 // ─── ONGLET CALENDRIER ANNUEL ────────────────────────────────────────
 function OngletCalendrier({ saison, showToast }) {
   const { saisonsCalendrier, joursExceptionnels, sauvegarderSaisonCalendrier, sauvegarderJourExceptionnel, supprimerJourExceptionnel } = useData()
@@ -540,12 +657,13 @@ export default function Budget() {
 
       <div style={{ display:'flex', gap:8, marginBottom:16 }}>
         <button onClick={()=>setOnglet('recettes')} style={{ ...BTN.ghost, ...(onglet==='recettes' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Recettes par cours</button>
+        <button onClick={()=>setOnglet('tarifs')} style={{ ...BTN.ghost, ...(onglet==='tarifs' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Tarifs</button>
         <button onClick={()=>setOnglet('calendrier')} style={{ ...BTN.ghost, ...(onglet==='calendrier' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Calendrier annuel</button>
       </div>
 
-      {onglet === 'recettes'
-        ? <OngletRecettes saison={saison} showToast={showToast} />
-        : <OngletCalendrier saison={saison} showToast={showToast} />}
+      {onglet === 'recettes' && <OngletRecettes saison={saison} showToast={showToast} />}
+      {onglet === 'tarifs' && <OngletTarifs saison={saison} showToast={showToast} />}
+      {onglet === 'calendrier' && <OngletCalendrier saison={saison} showToast={showToast} />}
 
       {toast && (
         <div style={{ position:'fixed', bottom:90, left:'50%', transform:'translateX(-50%)', background:'#1a1a1a', color:'#fff', padding:'10px 20px', borderRadius:20, fontSize:14, fontWeight:500, zIndex:400, whiteSpace:'nowrap' }}>
