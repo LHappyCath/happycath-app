@@ -40,6 +40,8 @@ export function DataProvider({ children }) {
   const [tarifs, setTarifs] = useState([])
   const [remises, setRemises] = useState([])
   const [budgetCoursPrevisionnel, setBudgetCoursPrevisionnel] = useState([])
+  const [saisonsCalendrier, setSaisonsCalendrier] = useState([])
+  const [joursExceptionnels, setJoursExceptionnels] = useState([])
   const [parametres, setParametres] = useState({})
   const [loading, setLoading] = useState(true)
   const [online, setOnline] = useState(navigator.onLine)
@@ -62,6 +64,8 @@ export function DataProvider({ children }) {
         setParametres(cached.parametres || {})
         setRemises(cached.remises || [])
         setBudgetCoursPrevisionnel(cached.budgetCoursPrevisionnel || [])
+        setSaisonsCalendrier(cached.saisonsCalendrier || [])
+        setJoursExceptionnels(cached.joursExceptionnels || [])
       }
       setLoading(false)
       return
@@ -69,7 +73,7 @@ export function DataProvider({ children }) {
 
     try {
       const [
-        { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }, { data: bc }
+        { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }, { data: bc }, { data: sc }, { data: je }
       ] = await Promise.all([
         supabase.from('cours').select('*').order('jour').order('heure'),
         supabase.from('membres').select('*').order('nom'),
@@ -81,10 +85,12 @@ export function DataProvider({ children }) {
         supabase.from('parametres').select('*'),
         supabase.from('remises').select('*').order('numero', { ascending: false }),
         supabase.from('budget_cours_previsionnel').select('*'),
+        supabase.from('saisons_calendrier').select('*'),
+        supabase.from('jours_exceptionnels').select('*'),
       ])
 
       const paramsObj = Object.fromEntries((p||[]).map(x => [x.cle, x.valeur]))
-      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[] }
+      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[] }
       setCours(data.cours)
       setMembres(data.membres)
       setInscriptions(data.inscriptions)
@@ -95,6 +101,8 @@ export function DataProvider({ children }) {
       setParametres(data.parametres)
       setRemises(data.remises)
       setBudgetCoursPrevisionnel(data.budgetCoursPrevisionnel)
+      setSaisonsCalendrier(data.saisonsCalendrier)
+      setJoursExceptionnels(data.joursExceptionnels)
       saveCache(data)
     } catch(e) {
       console.error('loadAll error:', e)
@@ -111,6 +119,8 @@ export function DataProvider({ children }) {
         setParametres(cached.parametres || {})
         setRemises(cached.remises || [])
         setBudgetCoursPrevisionnel(cached.budgetCoursPrevisionnel || [])
+        setSaisonsCalendrier(cached.saisonsCalendrier || [])
+        setJoursExceptionnels(cached.joursExceptionnels || [])
       }
     }
     setLoading(false)
@@ -173,6 +183,8 @@ export function DataProvider({ children }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tarifs' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'remises' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_cours_previsionnel' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'saisons_calendrier' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jours_exceptionnels' }, loadAll)
       .subscribe()
 
     return () => { if (realtimeSub.current) supabase.removeChannel(realtimeSub.current) }
@@ -616,6 +628,56 @@ export function DataProvider({ children }) {
     }
   }
 
+  // ─── CALENDRIER ANNUEL (bornes de saison + périodes exceptionnelles) ──
+  async function sauvegarderSaisonCalendrier(saison, dateDebut, dateFin) {
+    const data = { saison, date_debut: dateDebut, date_fin: dateFin }
+    setSaisonsCalendrier(prev => {
+      const idx = prev.findIndex(s => s.saison === saison)
+      if (idx >= 0) { const n = [...prev]; n[idx] = { ...n[idx], ...data }; return n }
+      return [...prev, data]
+    })
+    try {
+      const { error } = await supabase.from('saisons_calendrier').upsert(data, { onConflict: 'saison' })
+      if (error) throw error
+      return { success: true }
+    } catch(e) {
+      return { error: e.message }
+    }
+  }
+
+  async function sauvegarderJourExceptionnel(payload) {
+    const temp = payload.id ? payload : { ...payload, id: `temp-${Date.now()}` }
+    setJoursExceptionnels(prev => {
+      const idx = prev.findIndex(j => j.id === temp.id)
+      if (idx >= 0) { const n = [...prev]; n[idx] = temp; return n }
+      return [...prev, temp]
+    })
+    try {
+      const { id, ...sansId } = payload
+      const query = id && !String(id).startsWith('temp-')
+        ? supabase.from('jours_exceptionnels').update(sansId).eq('id', id).select()
+        : supabase.from('jours_exceptionnels').insert(sansId).select()
+      const { data: saved, error } = await query
+      if (error) throw error
+      setJoursExceptionnels(prev => [...prev.filter(j => j.id !== temp.id), ...(saved || [])])
+      return { success: true }
+    } catch(e) {
+      setJoursExceptionnels(prev => prev.filter(j => j.id !== temp.id))
+      return { error: e.message || "Erreur lors de l'enregistrement" }
+    }
+  }
+
+  async function supprimerJourExceptionnel(id) {
+    try {
+      const { error } = await supabase.from('jours_exceptionnels').delete().eq('id', id)
+      if (error) throw error
+      setJoursExceptionnels(prev => prev.filter(j => j.id !== id))
+      return { success: true }
+    } catch(e) {
+      return { error: e.message || 'Erreur lors de la suppression' }
+    }
+  }
+
   // Import en masse (ex: SportEasy) — ne crée que ce qui n'existe pas déjà
   async function importerLot({ cours: nCours = [], membres: nMembres = [], inscriptions: nInscriptions = [], reglements: nReglements = [] }) {
     const coursIds = new Set(cours.map(c => c.id))
@@ -867,7 +929,7 @@ export function DataProvider({ children }) {
   const value = {
     // Données
     cours, membres, inscriptions, historique, abonnements, reglements, tarifs, parametres, saisonActive, remises, banquesConnues,
-    budgetCoursPrevisionnel,
+    budgetCoursPrevisionnel, saisonsCalendrier, joursExceptionnels,
     loading, online, syncing, queueSize,
     // Actions
     loadAll,
@@ -883,6 +945,7 @@ export function DataProvider({ children }) {
     creerReglementsGroupes, creerReglementsPersonnalises, creerReglement, modifierReglement, toggleEndossement, supprimerReglement,
     sauvegarderTarif,
     sauvegarderBudgetCours, supprimerLigneBudget,
+    sauvegarderSaisonCalendrier, sauvegarderJourExceptionnel, supprimerJourExceptionnel,
     importerLot,
     mettreAJourMembres,
     mettreAJourMembresLot,
