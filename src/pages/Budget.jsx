@@ -99,14 +99,16 @@ function FormNouveauCours({ onClose, onCree }) {
 }
 
 // ─── LIGNE DE BUDGET (un cours) ─────────────────────────────────────
+// Le tarif annuel n'est plus édité ici : il vient de l'onglet Tarifs (source unique),
+// et se répercute automatiquement sur le calcul du CA prévu.
 function LigneBudget({ cours: c, budget, saison, bornes, joursExceptionnelsSaison, onChange, onRemove, onCategorieChange }) {
   const [local, setLocal] = useState({
     nb_seances_prevues: budget?.nb_seances_prevues ?? '',
     effectif_plein_prevu: budget?.effectif_plein_prevu ?? 0,
     effectif_reduit_prevu: budget?.effectif_reduit_prevu ?? 0,
-    tarif_prevu: budget?.tarif_prevu ?? c.tarif_plein ?? '',
     notes: budget?.notes ?? '',
   })
+  const tarif = Number(budget?.tarif_prevu ?? c.tarif_plein ?? 0)
 
   function set(k, v) { setLocal(l => ({ ...l, [k]: v })) }
 
@@ -117,7 +119,6 @@ function LigneBudget({ cours: c, budget, saison, bornes, joursExceptionnelsSaiso
       nb_seances_prevues: parseInt(champsEnPlus?.nb_seances_prevues ?? local.nb_seances_prevues, 10) || 0,
       effectif_plein_prevu: parseInt(local.effectif_plein_prevu, 10) || 0,
       effectif_reduit_prevu: parseInt(local.effectif_reduit_prevu, 10) || 0,
-      tarif_prevu: Number(local.tarif_prevu) || 0,
       notes: local.notes,
     })
   }
@@ -134,7 +135,6 @@ function LigneBudget({ cours: c, budget, saison, bornes, joursExceptionnelsSaiso
   }
 
   const effectif = (parseInt(local.effectif_plein_prevu,10)||0) + (parseInt(local.effectif_reduit_prevu,10)||0)
-  const tarif = Number(local.tarif_prevu) || 0
   const caPlein = (parseInt(local.effectif_plein_prevu,10)||0) * tarif
   const caReduit = (parseInt(local.effectif_reduit_prevu,10)||0) * tarif * 0.9
   const reduction = (parseInt(local.effectif_reduit_prevu,10)||0) * tarif * 0.1
@@ -175,8 +175,12 @@ function LigneBudget({ cours: c, budget, saison, bornes, joursExceptionnelsSaiso
         <div><label style={{ ...LABEL, fontSize:11 }}>Effectif tarif réduit</label>
           <input style={INPUT} type="number" min="0" value={local.effectif_reduit_prevu} onChange={e=>set('effectif_reduit_prevu', e.target.value)} onBlur={()=>save()} /></div>
         <div><label style={{ ...LABEL, fontSize:11 }}>Tarif annuel (€)</label>
-          <input style={INPUT} type="number" min="0" step="0.01" value={local.tarif_prevu} onChange={e=>set('tarif_prevu', e.target.value)} onBlur={()=>save()} /></div>
+          <div style={{ ...INPUT, background:'#f5f5f5', color: tarif ? '#1a1a1a' : '#bbb', display:'flex', alignItems:'center' }}>
+            {tarif ? fmtEuros(tarif) : '—'}
+          </div>
+        </div>
       </div>
+      <p style={{ fontSize:10, color:'#aaa', margin:'-6px 0 10px' }}>Le tarif annuel se modifie dans l'onglet Tarifs.</p>
 
       <div>
         <label style={{ ...LABEL, fontSize:11 }}>Inscriptions potentielles / notes</label>
@@ -386,12 +390,18 @@ const PERIODICITES_DECLINEES = [
   { cle: 'Heure', diviseur: null, champMajoration: 'majoration_heure' }, // diviseur = nb séances prévues
 ]
 
-function LigneTarif({ cours: c, tarifAnnuel, nbSeancesPrevues, tarifsExistants, onMajorationChange, onMontantCalcule }) {
+function LigneTarif({ cours: c, tarifAnnuel, nbSeancesPrevues, tarifsExistants, onMajorationChange, onMontantCalcule, onTarifAnnuelChange }) {
   const [majorations, setMajorations] = useState({
     majoration_semestriel: c.majoration_semestriel ?? 0,
     majoration_trimestriel: c.majoration_trimestriel ?? 0,
     majoration_heure: c.majoration_heure ?? 0,
   })
+  const [tarifAnnuelLocal, setTarifAnnuelLocal] = useState(tarifAnnuel ?? '')
+
+  function saveTarifAnnuel() {
+    const montant = Number(tarifAnnuelLocal) || 0
+    onTarifAnnuelChange(c.id, montant)
+  }
 
   function calculerMontant(p) {
     if (!tarifAnnuel) return null
@@ -416,9 +426,17 @@ function LigneTarif({ cours: c, tarifAnnuel, nbSeancesPrevues, tarifsExistants, 
       <div style={{ display:'flex', alignItems:'baseline', gap:10, marginBottom:10, flexWrap:'wrap' }}>
         <p style={{ fontSize:14, fontWeight:500, margin:0, flex:1, minWidth:160 }}>{c.nom}</p>
         <span style={{ fontSize:12, color:'#888' }}>{JOURS_FULL[c.jour]} {c.heure}</span>
-        <span style={{ fontSize:13, fontWeight:600, color:'#FF0099' }}>Annuel : {tarifAnnuel ? fmtEuros(tarifAnnuel) : '— (non défini dans Recettes par cours)'}</span>
       </div>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:10 }}>
+        <div style={{ background:'rgba(255,0,153,0.06)', borderRadius:10, padding:'10px 12px' }}>
+          <p style={{ fontSize:12, fontWeight:500, margin:'0 0 6px', color:'#FF0099' }}>Annuel</p>
+          <label style={{ ...LABEL, fontSize:10 }}>Tarif (€)</label>
+          <input style={INPUT} type="number" min="0" step="0.01"
+            value={tarifAnnuelLocal}
+            onChange={e=>setTarifAnnuelLocal(e.target.value)}
+            onBlur={saveTarifAnnuel} />
+          <p style={{ fontSize:10, color:'#aaa', margin:'6px 0 0' }}>Alimente le CA prévu dans Recettes par cours.</p>
+        </div>
         {PERIODICITES_DECLINEES.map(p => {
           const montant = calculerMontant(p)
           const existant = tarifsExistants.find(t => t.periodicite === p.cle)
@@ -449,7 +467,7 @@ function LigneTarif({ cours: c, tarifAnnuel, nbSeancesPrevues, tarifsExistants, 
 }
 
 function OngletTarifs({ saison, showToast }) {
-  const { cours, budgetCoursPrevisionnel, tarifs, sauvegarderCours, sauvegarderTarif } = useData()
+  const { cours, budgetCoursPrevisionnel, tarifs, sauvegarderCours, sauvegarderTarif, sauvegarderBudgetCours } = useData()
 
   const coursAffiches = useMemo(() => {
     const idsBudgetes = new Set(budgetCoursPrevisionnel.filter(b => b.saison === saison).map(b => b.cours_id))
@@ -469,11 +487,18 @@ function OngletTarifs({ saison, showToast }) {
     if (res?.error) showToast('Erreur : ' + res.error)
   }
 
+  // Le tarif Annuel se modifie ici : on l'enregistre à la fois comme tarif "Annuel"
+  // (pour l'affichage, ex: carte du cours) et comme tarif_prevu du budget (pour le CA prévu).
+  async function handleTarifAnnuelChange(coursId, montant) {
+    await handleMontantCalcule(coursId, 'Annuel', montant)
+    const res = await sauvegarderBudgetCours({ cours_id: coursId, saison, tarif_prevu: montant })
+    if (res?.error) showToast('Erreur : ' + res.error)
+  }
+
   return (
     <div>
       <p style={{ fontSize:13, color:'#888', marginBottom:16 }}>
-        Tarifs déclinés pour la saison <strong>{saison}</strong>, à partir du tarif annuel défini dans "Recettes par cours".
-        Le tarif "Annuel" par défilement de tarif réduit famille/multi-cours reste géré ailleurs (règlements) — ici, uniquement les déclinaisons Semestriel / Trimestriel / à la séance, avec une majoration modifiable cours par cours (0% = simple division du tarif annuel).
+        Tarifs par cours pour la saison <strong>{saison}</strong>. Le tarif <strong>Annuel</strong> se modifie ici et alimente automatiquement le CA prévu dans "Recettes par cours". Les tarifs Semestriel / Trimestriel / à la séance sont calculés à partir de lui, avec une majoration modifiable cours par cours (0% = simple division du tarif annuel).
       </p>
       {coursAffiches.length === 0 ? (
         <div className="card" style={{ textAlign:'center', padding:40 }}>
@@ -488,7 +513,8 @@ function OngletTarifs({ saison, showToast }) {
           return (
             <LigneTarif key={c.id} cours={c} tarifAnnuel={tarifAnnuel} nbSeancesPrevues={nbSeancesPrevues}
               tarifsExistants={tarifsExistants}
-              onMajorationChange={handleMajorationChange} onMontantCalcule={handleMontantCalcule} />
+              onMajorationChange={handleMajorationChange} onMontantCalcule={handleMontantCalcule}
+              onTarifAnnuelChange={handleTarifAnnuelChange} />
           )
         })
       )}

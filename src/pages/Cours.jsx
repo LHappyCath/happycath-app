@@ -12,7 +12,7 @@ function fmtEuros(n) { return Number(n||0).toLocaleString('fr-FR', { maximumFrac
 function LigneTarifsCours({ cours: c, tarifs, saison }) {
   const trouve = (periodicite) => tarifs.find(t => t.cours_id === c.id && t.saison === saison && t.periodicite === periodicite)
   const items = [
-    { label: 'Annuel', montant: c.tarif_plein },
+    { label: 'Annuel', montant: trouve('Annuel')?.montant ?? c.tarif_plein },
     { label: 'Semestre', montant: trouve('Semestriel')?.montant },
     { label: 'Trimestre', montant: trouve('Trimestriel')?.montant },
     { label: 'Séance', montant: trouve('Heure')?.montant },
