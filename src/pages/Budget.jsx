@@ -780,7 +780,8 @@ function fmtEurosSigne(n) {
 // Atterrissage — même logique que l'onglet Mensuel (répartition des recettes cours,
 // lignes miroir, ajustements d'atterrissage), pour alimenter le graphique.
 function calculerEvolutionBudget(saison, ctx) {
-  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres } = ctx
+  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, budgetSoldeInitial, parametres } = ctx
+  const soldeInitial = Number((budgetSoldeInitial||[]).find(s => s.saison === saison)?.montant || 0)
 
   let mappingCategoriesCours = {}
   try { mappingCategoriesCours = JSON.parse((parametres||{}).regroupements_indy_categories_cours || '{}') } catch(e) {}
@@ -829,7 +830,7 @@ function calculerEvolutionBudget(saison, ctx) {
 
   const soldePrevMois = recettesPrevMois.map((r,i) => r - chargesPrevMois[i])
   const soldeReelMois = recettesReelMois.map((r,i) => r - chargesReelMois[i])
-  let cp = 0, cr = 0
+  let cp = soldeInitial, cr = soldeInitial
   const soldePrevCumule = soldePrevMois.map(s => (cp += s))
   const soldeReelCumule = soldeReelMois.map(s => (cr += s))
 
@@ -882,7 +883,7 @@ function calculerEvolutionBudget(saison, ctx) {
   const sommeAtterrissageRecette = MOIS_CLES.map((_,i) => totalAtterrissageRecette.reduce((s,v) => s + v[i], 0))
   const sommeAtterrissageCharge = MOIS_CLES.map((_,i) => totalAtterrissageCharge.reduce((s,v) => s + v[i], 0))
   const soldeAtterrissageMois = sommeAtterrissageRecette.map((r,i) => r - sommeAtterrissageCharge[i])
-  let catt = 0
+  let catt = soldeInitial
   const soldeAtterrissageCumule = soldeAtterrissageMois.map(s => (catt += s))
 
   return { soldePrevCumule, soldeReelCumule, soldeAtterrissageCumule, dernierMoisAvecReel }
@@ -1033,11 +1034,11 @@ function GraphiqueEvolution({ soldePrevCumule, soldeReelCumule, soldeAtterrissag
 
 // ─── ONGLET GRAPHIQUE ────────────────────────────────────────────────
 function OngletGraphique({ saison }) {
-  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres } = useData()
+  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, budgetSoldeInitial, parametres } = useData()
 
   const donnees = useMemo(() => calculerEvolutionBudget(saison, {
-    cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres
-  }), [saison, cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres])
+    cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, budgetSoldeInitial, parametres
+  }), [saison, cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, budgetSoldeInitial, parametres])
 
   const { soldePrevCumule, soldeReelCumule, soldeAtterrissageCumule, dernierMoisAvecReel } = donnees
 
@@ -1688,9 +1689,9 @@ function OngletAutresRecettes({ saison, showToast }) {
 function OngletMensuel({ saison, showToast }) {
   const {
     cours, budgetCoursPrevisionnel, budgetPrevisionnel, budgetReel, budgetRepartition, budgetAutresRecettes,
-    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetAtterrissageLignes, budgetMoisClos, parametres,
+    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetAtterrissageLignes, budgetMoisClos, budgetSoldeInitial, parametres,
     sauvegarderLigneBudgetMensuel, supprimerLigneBudgetMensuel, sauvegarderRepartition,
-    sauvegarderIndyTotal, sauvegarderAtterrissage, sauvegarderAtterrissageLigne, toggleMoisClos,
+    sauvegarderIndyTotal, sauvegarderAtterrissage, sauvegarderAtterrissageLigne, toggleMoisClos, sauvegarderSoldeInitial,
   } = useData()
   const [vue, setVue] = useState('previsionnel')
   const [ouvertes, setOuvertes] = useState({ Gym: false, Danse: false })
@@ -1720,6 +1721,17 @@ function OngletMensuel({ saison, showToast }) {
   useEffect(() => { setRepLocal(repartition) }, [saison]) // resynchronise si on change de saison
 
   const totalRepartition = MOIS_CLES.reduce((s,m) => s + (Number(repLocal[m]) || 0), 0)
+
+  // Solde bancaire initial (au 01/08) de la saison : le compte n'est pas à 0 en début
+  // de saison, ce montant s'ajoute au solde cumulé (mais pas à l'écart, qui reste une
+  // pure différence réel/prévisionnel).
+  const soldeInitial = Number(budgetSoldeInitial.find(s => s.saison === saison)?.montant || 0)
+  const [soldeInitialLocal, setSoldeInitialLocal] = useState(soldeInitial)
+  useEffect(() => { setSoldeInitialLocal(soldeInitial) }, [saison, soldeInitial])
+  async function handleSaveSoldeInitial() {
+    const res = await sauvegarderSoldeInitial(saison, Number(soldeInitialLocal) || 0)
+    if (res?.error) showToast('Erreur : ' + res.error)
+  }
 
   // Recettes cours (Gym/Danse), calculées à partir de la Brique A + répartition
   const parCategorie = useMemo(() => {
@@ -1816,7 +1828,7 @@ function OngletMensuel({ saison, showToast }) {
     : totalParMois(lignesRecetteLibres)
   const totalChargesMois = totalParMois(lignesCharges)
   const soldeMois = totalRecettesMois.map((r,i) => r - totalChargesMois[i])
-  let cumul = 0
+  let cumul = soldeInitial
   const soldeCumule = soldeMois.map(s => (cumul += s))
 
   // Référence prévisionnelle d'un regroupement (somme des lignes prévisionnelles qui le
@@ -1942,7 +1954,7 @@ function OngletMensuel({ saison, showToast }) {
   const sommeAtterrissageRecette = MOIS_CLES.map((_,i) => totalAtterrissageRecette.reduce((s,v) => s + v[i], 0))
   const sommeAtterrissageCharge = MOIS_CLES.map((_,i) => totalAtterrissageCharge.reduce((s,v) => s + v[i], 0))
   const soldeAtterrissageMois = sommeAtterrissageRecette.map((r,i) => r - sommeAtterrissageCharge[i])
-  let cumulAtt = 0
+  let cumulAtt = soldeInitial
   const soldeAtterrissageCumule = soldeAtterrissageMois.map(s => (cumulAtt += s))
 
   return (
@@ -1976,6 +1988,21 @@ function OngletMensuel({ saison, showToast }) {
           ))}
         </div>
         <button style={BTN.ghost} onClick={handleSaveRepartition}>Enregistrer la répartition</button>
+      </div>
+
+      <div className="card" style={{ padding:16, marginBottom:20 }}>
+        <p style={{ fontSize:12, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.06em', margin:'0 0 10px' }}>
+          Solde bancaire initial (au 01/08)
+        </p>
+        <div style={{ display:'flex', alignItems:'flex-end', gap:10, flexWrap:'wrap' }}>
+          <div>
+            <label style={LABEL}>Solde au 1er août</label>
+            <input type="number" step="0.01" style={INPUT} value={soldeInitialLocal}
+              onChange={e=>setSoldeInitialLocal(e.target.value)} />
+          </div>
+          <button style={BTN.ghost} onClick={handleSaveSoldeInitial}>Enregistrer</button>
+          <span style={{ fontSize:12, color:'#888' }}>Ajouté au solde cumulé (Prévisionnel/Réel/Atterrissage) — sans effet sur l'Écart.</span>
+        </div>
       </div>
 
       <div style={{ display:'flex', gap:8, marginBottom:14 }}>
