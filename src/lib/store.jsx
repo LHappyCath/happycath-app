@@ -841,10 +841,11 @@ export function DataProvider({ children }) {
   // ligne à ligne. À la création, on crée la ligne miroir (à zéro) automatiquement ;
   // à la modification du libellé/regroupement/entité, on répercute sur le miroir sans
   // jamais toucher aux montants déjà saisis dans l'autre table.
-  async function sauvegarderLigneBudgetMensuel(table, payload) {
+  // options.sansMiroir : n'auto-crée pas la ligne miroir dans l'autre table — utilisé pour
+  // matérialiser en Réel une source calculée (cours, autres recettes) qui n'a pas de ligne
+  // prévisionnelle "manuelle" à mirorer (son prévisionnel est calculé, pas saisi).
+  async function sauvegarderLigneBudgetMensuel(table, payload, options = {}) {
     const [lignes, setLignes] = stateEtSetter(table)
-    const autreTable = table === 'budget_reel' ? 'budget_previsionnel' : 'budget_reel'
-    const [autreLignes, setAutreLignes] = stateEtSetter(autreTable)
     const isNew = !payload.id
     const lien = payload.lien || ('bl' + Date.now().toString(36))
     const data = { saison: saisonActive, entite: 'Asso', ...payload, lien }
@@ -857,6 +858,10 @@ export function DataProvider({ children }) {
       res = await upsert(table, data, () => setLignes(prev => prev.map(l => l.id === data.id ? { ...l, ...data } : l)))
     }
 
+    if (options.sansMiroir) return res
+
+    const autreTable = table === 'budget_reel' ? 'budget_previsionnel' : 'budget_reel'
+    const [autreLignes, setAutreLignes] = stateEtSetter(autreTable)
     const cible = autreLignes.find(l => l.lien === lien)
     if (!cible) {
       const miroir = { type: data.type, saison: data.saison, libelle: data.libelle, regroupement_id: data.regroupement_id, entite: data.entite, lien, ...zerosMoisStore() }
