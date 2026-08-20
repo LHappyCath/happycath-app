@@ -664,6 +664,7 @@ const MOIS_COURTS = ['Août','Sept','Oct','Nov','Déc','Janv','Fév','Mars','Avr
 function zerosMois() { return Object.fromEntries(MOIS_CLES.map(m => [m, 0])) }
 function totalLigne(l) { return MOIS_CLES.reduce((s,m) => s + Number(l[m]||0), 0) }
 function totalParMois(lignes) { return MOIS_CLES.map(m => lignes.reduce((s,l) => s + Number(l[m]||0), 0)) }
+function valeursDeLigne(ligne) { return ligne ? MOIS_CLES.map(m => Number(ligne[m]||0)) : MOIS_CLES.map(()=>0) }
 
 function fmtEurosSigne(n) {
   const sign = n < 0 ? '-' : ''
@@ -792,6 +793,78 @@ function LigneEcart({ valeurs }) {
       ))}
       <td /><td />
     </tr>
+  )
+}
+
+// Une paire Réel/Prévisionnel (même ligne, via le lien miroir) : écart par mois,
+// dépliable pour voir le détail des deux montants d'origine.
+function LigneEcartPaire({ libelle, valeursPrev, valeursReel, type }) {
+  const [ouvert, setOuvert] = useState(false)
+  const ecart = valeursReel.map((v,i) => v - valeursPrev[i])
+  const estFavorable = (v) => type === 'recette' ? v >= -0.01 : v <= 0.01
+  return (
+    <>
+      <tr onClick={()=>setOuvert(o=>!o)} style={{ cursor:'pointer' }}>
+        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, whiteSpace:'nowrap', position:'sticky', left:0, background:'#fff' }}>
+          {ouvert ? '▾' : '▸'} {libelle}
+        </td>
+        {ecart.map((v,i) => (
+          <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', fontWeight:600, color: Math.abs(v)<0.01 ? '#bbb' : (estFavorable(v) ? '#1D9E75' : '#D85A30') }}>
+            {Math.abs(v)<0.01 ? '—' : fmtEurosSigne(v)}
+          </td>
+        ))}
+        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:700, textAlign:'right', color: estFavorable(ecart.reduce((s,v)=>s+v,0)) ? '#1D9E75' : '#D85A30' }}>
+          {fmtEurosSigne(ecart.reduce((s,v)=>s+v,0))}
+        </td>
+        <td />
+      </tr>
+      {ouvert && (
+        <>
+          <tr>
+            <td style={{ padding:'2px 8px 2px 24px', fontSize:11, color:'#aaa', position:'sticky', left:0, background:'#fff' }}>Réel</td>
+            {valeursReel.map((v,i) => <td key={i} style={{ padding:'2px 4px', fontSize:11, textAlign:'right', color:'#aaa' }}>{v ? fmtEuros(v) : '—'}</td>)}
+            <td style={{ padding:'2px 8px', fontSize:11, textAlign:'right', color:'#aaa' }}>{fmtEuros(valeursReel.reduce((s,v)=>s+v,0))}</td>
+            <td />
+          </tr>
+          <tr>
+            <td style={{ padding:'2px 8px 6px 24px', fontSize:11, color:'#aaa', position:'sticky', left:0, background:'#fff' }}>Prévisionnel</td>
+            {valeursPrev.map((v,i) => <td key={i} style={{ padding:'2px 4px 6px', fontSize:11, textAlign:'right', color:'#aaa' }}>{v ? fmtEuros(v) : '—'}</td>)}
+            <td style={{ padding:'2px 8px 6px', fontSize:11, textAlign:'right', color:'#aaa' }}>{fmtEuros(valeursPrev.reduce((s,v)=>s+v,0))}</td>
+            <td />
+          </tr>
+        </>
+      )}
+    </>
+  )
+}
+
+// Bloc d'un regroupement dans la vue Écart : sous-total de l'écart, dépliable pour
+// voir chaque paire de lignes (réel vs prévisionnel).
+function BlocRegroupementEcart({ nom, type, paires, ouvert, onToggle }) {
+  const sousTotalReel = MOIS_CLES.map((_,i) => paires.reduce((s,p) => s + p.valeursReel[i], 0))
+  const sousTotalPrev = MOIS_CLES.map((_,i) => paires.reduce((s,p) => s + p.valeursPrev[i], 0))
+  const ecart = sousTotalReel.map((v,i) => v - sousTotalPrev[i])
+  const estFavorable = (v) => type === 'recette' ? v >= -0.01 : v <= 0.01
+  return (
+    <>
+      <tr onClick={onToggle} style={{ cursor:'pointer', background:'#f7f7f8' }}>
+        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8' }}>
+          {ouvert ? '▾' : '▸'} {nom} <span style={{ color:'#aaa', fontWeight:400 }}>({paires.length})</span>
+        </td>
+        {ecart.map((v,i) => (
+          <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', fontWeight:700, color: Math.abs(v)<0.01 ? '#bbb' : (estFavorable(v) ? '#1D9E75' : '#D85A30') }}>
+            {Math.abs(v)<0.01 ? '—' : fmtEurosSigne(v)}
+          </td>
+        ))}
+        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:700, textAlign:'right', color: estFavorable(ecart.reduce((s,v)=>s+v,0)) ? '#1D9E75' : '#D85A30' }}>
+          {fmtEurosSigne(ecart.reduce((s,v)=>s+v,0))}
+        </td>
+        <td />
+      </tr>
+      {ouvert && paires.map(p => (
+        <LigneEcartPaire key={p.key} libelle={p.libelle} valeursPrev={p.valeursPrev} valeursReel={p.valeursReel} type={type} />
+      ))}
+    </>
   )
 }
 
@@ -1091,6 +1164,22 @@ function OngletMensuel({ saison, showToast }) {
     return lignesReelSaison.filter(l => l.type === type && (l.regroupement_id || null) === regroupementId)
   }
 
+  // Apparie les lignes Prévisionnel et Réel d'un regroupement via leur lien miroir
+  // (les lignes sans lien, plus anciennes, sont appariées avec un "vide" de l'autre côté).
+  function pairesDuRegroupement(regroupementId, type) {
+    const prevLignes = lignesPrevSaison.filter(l => l.type === type && (l.regroupement_id || null) === regroupementId)
+    const reelLignes = lignesReelSaison.filter(l => l.type === type && (l.regroupement_id || null) === regroupementId)
+    const parCle = new Map()
+    for (const l of prevLignes) { const cle = l.lien || ('p_' + l.id); if (!parCle.has(cle)) parCle.set(cle, {}); parCle.get(cle).prev = l }
+    for (const l of reelLignes) { const cle = l.lien || ('r_' + l.id); if (!parCle.has(cle)) parCle.set(cle, {}); parCle.get(cle).reel = l }
+    return [...parCle.entries()].map(([cle, { prev, reel }]) => ({
+      key: cle,
+      libelle: reel?.libelle || prev?.libelle || '(sans nom)',
+      valeursPrev: valeursDeLigne(prev),
+      valeursReel: valeursDeLigne(reel),
+    }))
+  }
+
   // Écart réel / prévisionnel global (indépendant du toggle d'affichage)
   const lignesRecettePrev = lignesPrevSaison.filter(l => l.type === 'recette')
   const lignesChargePrev = lignesPrevSaison.filter(l => l.type === 'charge')
@@ -1100,6 +1189,14 @@ function OngletMensuel({ saison, showToast }) {
   const totalRecetteReel = lignesRecetteReel.reduce((s,l) => s + totalLigne(l), 0)
   const totalChargePrev = lignesChargePrev.reduce((s,l) => s + totalLigne(l), 0)
   const totalChargeReel = lignesChargeReel.reduce((s,l) => s + totalLigne(l), 0)
+
+  const recettesPrevMois = totalParMois([...lignesCoursValeurs, ...lignesRecettePrev])
+  const recettesReelMois = totalParMois(lignesRecetteReel)
+  const chargesPrevMois = totalParMois(lignesChargePrev)
+  const chargesReelMois = totalParMois(lignesChargeReel)
+  const soldeEcartMois = recettesReelMois.map((v,i) => (v - recettesPrevMois[i]) - (chargesReelMois[i] - chargesPrevMois[i]))
+  let cumulEcart = 0
+  const soldeEcartCumule = soldeEcartMois.map(s => (cumulEcart += s))
 
   // Clôture mensuelle
   const moisClos = useMemo(() => budgetMoisClos.find(m => m.saison === saison) || { saison, ...Object.fromEntries(MOIS_CLES.map(m => [m, false])) }, [budgetMoisClos, saison])
@@ -1185,7 +1282,14 @@ function OngletMensuel({ saison, showToast }) {
         <button onClick={()=>setVue('previsionnel')} style={{ ...BTN.ghost, ...(vue==='previsionnel' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Prévisionnel</button>
         <button onClick={()=>setVue('reel')} style={{ ...BTN.ghost, ...(vue==='reel' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Réel</button>
         <button onClick={()=>setVue('atterrissage')} style={{ ...BTN.ghost, ...(vue==='atterrissage' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Atterrissage</button>
+        <button onClick={()=>setVue('ecart')} style={{ ...BTN.ghost, ...(vue==='ecart' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Écart</button>
       </div>
+
+      {vue === 'ecart' && (
+        <p style={{ fontSize:12, color:'#888', marginBottom:8 }}>
+          Réel − Prévisionnel, ligne à ligne. Vert = favorable, rouge = à surveiller. Déplie une ligne pour voir les deux montants d'origine.
+        </p>
+      )}
 
       {vue === 'atterrissage' && (
         <>
@@ -1196,7 +1300,7 @@ function OngletMensuel({ saison, showToast }) {
         </>
       )}
 
-      {vue !== 'atterrissage' && (
+      {(vue === 'previsionnel' || vue === 'reel') && (
         <div style={{ overflowX:'auto', marginBottom:16 }}>
           <table style={{ borderCollapse:'collapse', width:'100%' }}>
             <EnteteTableau label="Recettes" />
@@ -1250,7 +1354,7 @@ function OngletMensuel({ saison, showToast }) {
         </div>
       )}
 
-      {vue !== 'atterrissage' && (
+      {(vue === 'previsionnel' || vue === 'reel') && (
         <div style={{ overflowX:'auto', marginBottom:16 }}>
           <table style={{ borderCollapse:'collapse', width:'100%' }}>
             <EnteteTableau label="Charges" />
@@ -1279,6 +1383,42 @@ function OngletMensuel({ saison, showToast }) {
           </table>
           <button style={{ ...BTN.small, marginTop:8 }} onClick={()=>setModalLigne({ type:'charge', regroupementId:null })}>+ Ligne de charge</button>
         </div>
+      )}
+
+      {vue === 'ecart' && (
+        <>
+          <div style={{ overflowX:'auto', marginBottom:16 }}>
+            <table style={{ borderCollapse:'collapse', width:'100%' }}>
+              <EnteteTableau label="Recettes — écart" />
+              <tbody>
+                {[...regroupementsRecette, { id: null, nom: 'Non classé' }].map(r => {
+                  const paires = pairesDuRegroupement(r.id, 'recette')
+                  if (paires.length === 0) return null
+                  return (
+                    <BlocRegroupementEcart key={r.id || 'nonclasse'} nom={r.nom} type="recette" paires={paires}
+                      ouvert={!!ouvertes['e_r_'+(r.id||'nonclasse')]} onToggle={()=>setOuvertes(o=>({...o, ['e_r_'+(r.id||'nonclasse')]: !o['e_r_'+(r.id||'nonclasse')]}))} />
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ overflowX:'auto', marginBottom:16 }}>
+            <table style={{ borderCollapse:'collapse', width:'100%' }}>
+              <EnteteTableau label="Charges — écart" />
+              <tbody>
+                {[...regroupementsCharge, { id: null, nom: 'Non classé' }].map(r => {
+                  const paires = pairesDuRegroupement(r.id, 'charge')
+                  if (paires.length === 0) return null
+                  return (
+                    <BlocRegroupementEcart key={r.id || 'nonclasse'} nom={r.nom} type="charge" paires={paires}
+                      ouvert={!!ouvertes['e_c_'+(r.id||'nonclasse')]} onToggle={()=>setOuvertes(o=>({...o, ['e_c_'+(r.id||'nonclasse')]: !o['e_c_'+(r.id||'nonclasse')]}))} />
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {vue === 'atterrissage' && (
@@ -1321,15 +1461,22 @@ function OngletMensuel({ saison, showToast }) {
         <table style={{ borderCollapse:'collapse', width:'100%' }}>
           <EnteteTableau label="Solde" />
           <tbody>
-            {vue !== 'atterrissage' ? (
-              <>
-                <LigneCalculee libelle="Solde du mois" valeurs={soldeMois} fort />
-                <LigneCalculee libelle="Solde cumulé" valeurs={soldeCumule} fort totalAffiche={soldeCumule[soldeCumule.length-1]} />
-              </>
-            ) : (
+            {vue === 'atterrissage' && (
               <>
                 <LigneCalculee libelle="Atterrissage du mois" valeurs={soldeAtterrissageMois} fort />
                 <LigneCalculee libelle="Atterrissage cumulé" valeurs={soldeAtterrissageCumule} fort totalAffiche={soldeAtterrissageCumule[soldeAtterrissageCumule.length-1]} />
+              </>
+            )}
+            {vue === 'ecart' && (
+              <>
+                <LigneCalculee libelle="Écart solde du mois" valeurs={soldeEcartMois} fort />
+                <LigneCalculee libelle="Écart solde cumulé" valeurs={soldeEcartCumule} fort totalAffiche={soldeEcartCumule[soldeEcartCumule.length-1]} />
+              </>
+            )}
+            {(vue === 'previsionnel' || vue === 'reel') && (
+              <>
+                <LigneCalculee libelle="Solde du mois" valeurs={soldeMois} fort />
+                <LigneCalculee libelle="Solde cumulé" valeurs={soldeCumule} fort totalAffiche={soldeCumule[soldeCumule.length-1]} />
               </>
             )}
           </tbody>
