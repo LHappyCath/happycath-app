@@ -931,7 +931,7 @@ function GraphiqueBarresComparaison({ prev, reel, libellePeriode }) {
 function GraphiqueEvolution({ soldePrevCumule, soldeReelCumule, soldeAtterrissageCumule, dernierMoisAvecReel }) {
   const [survol, setSurvol] = useState(null)
   const largeur = 680, hauteur = 260
-  const margeHautB = 16, margeBas = 34, margeGauche = 14, margeDroite = 96
+  const margeHautB = 16, margeBas = 34, margeGauche = 40, margeDroite = 150
   const zoneW = largeur - margeGauche - margeDroite
   const zoneH = hauteur - margeHautB - margeBas
 
@@ -983,9 +983,16 @@ function GraphiqueEvolution({ soldePrevCumule, soldeReelCumule, soldeAtterrissag
       </div>
       <svg width="100%" viewBox={`0 0 ${largeur} ${hauteur}`} style={{ display:'block' }}
         onMouseMove={onMove} onMouseLeave={()=>setSurvol(null)}>
-        {[0,0.25,0.5,0.75,1].map(t => (
-          <line key={t} x1={margeGauche} x2={largeur-margeDroite} y1={margeHautB+zoneH*t} y2={margeHautB+zoneH*t} stroke="#e1e0d9" strokeWidth="1" />
-        ))}
+        {[0,0.25,0.5,0.75,1].map(t => {
+          const yLigne = margeHautB + zoneH * t
+          const valeur = maxV - span * t
+          return (
+            <g key={t}>
+              <line x1={margeGauche} x2={largeur-margeDroite} y1={yLigne} y2={yLigne} stroke="#e1e0d9" strokeWidth="1" />
+              <text x={margeGauche - 6} y={yLigne + 3} textAnchor="end" fontSize="9" fill="#aaa9a2">{fmtEurosSigne(Math.round(valeur))}</text>
+            </g>
+          )
+        })}
         <line x1={margeGauche} x2={largeur-margeDroite} y1={yZero} y2={yZero} stroke="#c3c2b7" strokeWidth="1" />
         {MOIS_COURTS.map((m,i) => (
           <text key={m} x={x(i)} y={hauteur-margeBas+18} textAnchor="middle" fontSize="10" fill="#898781">{m}</text>
@@ -994,7 +1001,11 @@ function GraphiqueEvolution({ soldePrevCumule, soldeReelCumule, soldeAtterrissag
           <g key={s.nom}>
             <path d={s.d} fill="none" stroke={s.couleur} strokeWidth="2" strokeLinecap="round" />
             {s.dernier && <circle cx={s.dernier[0]} cy={s.dernier[1]} r="4" fill={s.couleur} />}
-            {s.dernier && <text x={s.dernier[0]+8} y={(labelY[i] ?? s.dernier[1])+4} fontSize="11" fontWeight="600" fill="#0b0b0b">{s.nom}</text>}
+            {s.dernier && (
+              <text x={s.dernier[0]+8} y={(labelY[i] ?? s.dernier[1])+4} fontSize="10" fontWeight="600" fill="#0b0b0b">
+                {s.nom} : {fmtEurosSigne(s.valeurs.filter(v=>v!=null).slice(-1)[0])}
+              </text>
+            )}
           </g>
         ))}
         {survol != null && (
@@ -1047,7 +1058,10 @@ function OngletGraphique({ saison }) {
       </div>
 
       <div className="card" style={{ padding:20, marginBottom:20 }}>
-        <p style={{ ...LABEL, marginBottom:14 }}>Évolution du solde cumulé sur la saison</p>
+        <p style={{ ...LABEL, marginBottom:6 }}>Évolution du solde cumulé sur la saison</p>
+        <p style={{ fontSize:12, color:'#888', marginBottom:14 }}>
+          Pour chaque mois (d'août à juillet), le solde cumulé depuis le début de la saison (recettes − charges) : en bleu le budget <strong>Prévisionnel</strong>, en orange le <strong>Réel</strong> (s'arrête au dernier mois où tu as saisi du réel), en vert l'<strong>Atterrissage</strong> (ta projection de fin d'année). Passe la souris sur le graphique pour voir les montants exacts mois par mois ; les valeurs de fin de courbe sont déjà indiquées à droite.
+        </p>
         <GraphiqueEvolution soldePrevCumule={soldePrevCumule} soldeReelCumule={soldeReelCumule}
           soldeAtterrissageCumule={soldeAtterrissageCumule} dernierMoisAvecReel={dernierMoisAvecReel} />
       </div>
@@ -1778,11 +1792,18 @@ function OngletMensuel({ saison, showToast }) {
     async function synchroniserLignesMiroirVirtuelles() {
       for (const source of sourcesRecetteVirtuelle) {
         if (!source.regroupementId) continue
-        const dejaPresente = lignesReelSaison.some(l => l.type === 'recette' && l.lien === source.cle)
-        if (dejaPresente) continue
-        await sauvegarderLigneBudgetMensuel('budget_reel', {
-          type: 'recette', saison, libelle: source.libelle, regroupement_id: source.regroupementId, lien: source.cle, ...zerosMois(),
-        }, { sansMiroir: true })
+        const existante = lignesReelSaison.find(l => l.type === 'recette' && l.lien === source.cle)
+        if (!existante) {
+          await sauvegarderLigneBudgetMensuel('budget_reel', {
+            type: 'recette', saison, libelle: source.libelle, regroupement_id: source.regroupementId, lien: source.cle, ...zerosMois(),
+          }, { sansMiroir: true })
+        } else if (existante.regroupement_id !== source.regroupementId || existante.libelle !== source.libelle) {
+          // Rattrape une ligne déjà créée dont le regroupement ne correspond plus
+          // (ex : mapping changé ou ligne créée avant que le paramétrage soit défini).
+          await sauvegarderLigneBudgetMensuel('budget_reel', {
+            ...existante, regroupement_id: source.regroupementId, libelle: source.libelle,
+          }, { sansMiroir: true })
+        }
       }
     }
     synchroniserLignesMiroirVirtuelles()
@@ -2169,17 +2190,19 @@ function OngletMensuel({ saison, showToast }) {
 
       <div className="card" style={{ padding:16 }}>
         <p style={{ fontSize:12, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>
-          Écart réel / prévisionnel — total saison
+          {(vue === 'previsionnel' || vue === 'reel') ? 'Totaux — total saison' : 'Écart réel / prévisionnel — total saison'}
         </p>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px,1fr))', gap:12 }}>
           <div><p style={{ fontSize:11, color:'#888', margin:'0 0 2px' }}>Recettes prévu</p><p style={{ fontSize:15, fontWeight:600, margin:0 }}>{fmtEuros(totalRecettePrev)}</p></div>
           <div><p style={{ fontSize:11, color:'#888', margin:'0 0 2px' }}>Recettes réel</p><p style={{ fontSize:15, fontWeight:600, margin:0 }}>{fmtEuros(totalRecetteReel)}</p></div>
           <div><p style={{ fontSize:11, color:'#888', margin:'0 0 2px' }}>Charges prévu</p><p style={{ fontSize:15, fontWeight:600, margin:0 }}>{fmtEuros(totalChargePrev)}</p></div>
           <div><p style={{ fontSize:11, color:'#888', margin:'0 0 2px' }}>Charges réel</p><p style={{ fontSize:15, fontWeight:600, margin:0 }}>{fmtEuros(totalChargeReel)}</p></div>
-          <div><p style={{ fontSize:11, color:'#888', margin:'0 0 2px' }}>Écart solde</p>
-            <p style={{ fontSize:15, fontWeight:700, margin:0, color: (totalRecetteReel-totalChargeReel) >= (totalRecettePrev-totalChargePrev) ? '#1D9E75' : '#D85A30' }}>
-              {fmtEurosSigne((totalRecetteReel-totalChargeReel) - (totalRecettePrev-totalChargePrev))}
-            </p></div>
+          {(vue === 'ecart' || vue === 'atterrissage') && (
+            <div><p style={{ fontSize:11, color:'#888', margin:'0 0 2px' }}>Écart solde</p>
+              <p style={{ fontSize:15, fontWeight:700, margin:0, color: (totalRecetteReel-totalChargeReel) >= (totalRecettePrev-totalChargePrev) ? '#1D9E75' : '#D85A30' }}>
+                {fmtEurosSigne((totalRecetteReel-totalChargeReel) - (totalRecettePrev-totalChargePrev))}
+              </p></div>
+          )}
         </div>
       </div>
 
