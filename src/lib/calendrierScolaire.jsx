@@ -24,7 +24,14 @@ function ajouterJours(date, n) {
   return d
 }
 
-function iso(date) { return date.toISOString().slice(0, 10) }
+// Format YYYY-MM-DD en heure LOCALE (surtout pas toISOString, qui convertit en UTC et
+// décale la date d'un jour pour un fuseau en avance sur UTC comme la France).
+function iso(date) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const j = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${j}`
+}
 
 // Retourne les jours fériés français couvrant une saison "AAAA-AAAA" (de septembre à août).
 // Les vacances scolaires, elles, n'ont pas de formule : à ressaisir chaque saison.
