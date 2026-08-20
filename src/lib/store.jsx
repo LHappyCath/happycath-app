@@ -55,6 +55,7 @@ export function DataProvider({ children }) {
   const [budgetAtterrissageLignes, setBudgetAtterrissageLignes] = useState([])
   const [budgetMoisClos, setBudgetMoisClos] = useState([])
   const [comptesIndyMapping, setComptesIndyMapping] = useState([])
+  const [budgetAutresRecettes, setBudgetAutresRecettes] = useState([])
   const [parametres, setParametres] = useState({})
   const [loading, setLoading] = useState(true)
   const [online, setOnline] = useState(navigator.onLine)
@@ -92,6 +93,7 @@ export function DataProvider({ children }) {
         setBudgetAtterrissageLignes(cached.budgetAtterrissageLignes || [])
         setBudgetMoisClos(cached.budgetMoisClos || [])
         setComptesIndyMapping(cached.comptesIndyMapping || [])
+        setBudgetAutresRecettes(cached.budgetAutresRecettes || [])
       }
       setLoading(false)
       return
@@ -102,7 +104,7 @@ export function DataProvider({ children }) {
         { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }, { data: bc }, { data: sc }, { data: je },
         { data: st }, { data: sg }, { data: si }, { data: sp },
         { data: bp }, { data: br }, { data: brp },
-        { data: ri }, { data: bit }, { data: bat }, { data: bal }, { data: bmc }, { data: cim }
+        { data: ri }, { data: bit }, { data: bat }, { data: bal }, { data: bmc }, { data: cim }, { data: bar }
       ] = await Promise.all([
         supabase.from('cours').select('*').order('jour').order('heure'),
         supabase.from('membres').select('*').order('nom'),
@@ -129,10 +131,11 @@ export function DataProvider({ children }) {
         supabase.from('budget_atterrissage_lignes').select('*'),
         supabase.from('budget_mois_clos').select('*'),
         supabase.from('comptes_indy_mapping').select('*'),
+        supabase.from('budget_autres_recettes').select('*'),
       ])
 
       const paramsObj = Object.fromEntries((p||[]).map(x => [x.cle, x.valeur]))
-      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[], budgetPrevisionnel: bp||[], budgetReel: br||[], budgetRepartition: brp||[], regroupementsIndy: ri||[], budgetIndyTotaux: bit||[], budgetAtterrissage: bat||[], budgetAtterrissageLignes: bal||[], budgetMoisClos: bmc||[], comptesIndyMapping: cim||[] }
+      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[], budgetPrevisionnel: bp||[], budgetReel: br||[], budgetRepartition: brp||[], regroupementsIndy: ri||[], budgetIndyTotaux: bit||[], budgetAtterrissage: bat||[], budgetAtterrissageLignes: bal||[], budgetMoisClos: bmc||[], comptesIndyMapping: cim||[], budgetAutresRecettes: bar||[] }
       setCours(data.cours)
       setMembres(data.membres)
       setInscriptions(data.inscriptions)
@@ -158,6 +161,7 @@ export function DataProvider({ children }) {
       setBudgetAtterrissageLignes(data.budgetAtterrissageLignes)
       setBudgetMoisClos(data.budgetMoisClos)
       setComptesIndyMapping(data.comptesIndyMapping)
+      setBudgetAutresRecettes(data.budgetAutresRecettes)
       saveCache(data)
     } catch(e) {
       console.error('loadAll error:', e)
@@ -189,6 +193,7 @@ export function DataProvider({ children }) {
         setBudgetAtterrissageLignes(cached.budgetAtterrissageLignes || [])
         setBudgetMoisClos(cached.budgetMoisClos || [])
         setComptesIndyMapping(cached.comptesIndyMapping || [])
+        setBudgetAutresRecettes(cached.budgetAutresRecettes || [])
       }
     }
     setLoading(false)
@@ -266,6 +271,7 @@ export function DataProvider({ children }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_atterrissage_lignes' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_mois_clos' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comptes_indy_mapping' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_autres_recettes' }, loadAll)
       .subscribe()
 
     return () => { if (realtimeSub.current) supabase.removeChannel(realtimeSub.current) }
@@ -1007,6 +1013,33 @@ export function DataProvider({ children }) {
     }
   }
 
+  // ─── AUTRES RECETTES (Location, Stages, Prestations) ──────────
+  // Une ligne par poste ; tarif fixe + quantité par mois (heures ou nb de participants) —
+  // le CA mensuel (tarif × quantité) se calcule côté appli, jamais stocké ici.
+  async function sauvegarderAutreRecette(payload) {
+    const isNew = !payload.id
+    const data = { saison: saisonActive, ...payload }
+    if (isNew) {
+      return insert('budget_autres_recettes', data, () => {
+        const temp = { ...data, id: `temp-${Date.now()}` }
+        setBudgetAutresRecettes(prev => [...prev, temp])
+      })
+    }
+    return upsert('budget_autres_recettes', data, () => setBudgetAutresRecettes(prev => prev.map(l => l.id === data.id ? { ...l, ...data } : l)))
+  }
+
+  async function supprimerAutreRecette(id) {
+    if (!navigator.onLine) return { offline: true }
+    try {
+      const { error } = await supabase.from('budget_autres_recettes').delete().eq('id', id)
+      if (error) throw error
+      setBudgetAutresRecettes(prev => prev.filter(l => l.id !== id))
+      return { success: true }
+    } catch(e) {
+      return { error: e.message || 'Erreur lors de la suppression' }
+    }
+  }
+
   // ─── MAPPING COMPTES INDY (FEC) ────────────────────────────────
   async function sauvegarderCompteMapping(compte, libelle, regroupementId) {
     const data = { compte, libelle, regroupement_id: regroupementId }
@@ -1368,7 +1401,7 @@ export function DataProvider({ children }) {
     budgetCoursPrevisionnel, saisonsCalendrier, joursExceptionnels,
     stages, stagiaires, stageInscriptions, stagePresences,
     budgetPrevisionnel, budgetReel, budgetRepartition,
-    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetAtterrissageLignes, budgetMoisClos, comptesIndyMapping,
+    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetAtterrissageLignes, budgetMoisClos, comptesIndyMapping, budgetAutresRecettes,
     loading, online, syncing, queueSize,
     // Actions
     loadAll,
@@ -1388,7 +1421,7 @@ export function DataProvider({ children }) {
     sauvegarderStage, archiverStage, sauvegarderStagiaire, inscrireStagiaire, desinscrireStagiaire, sauvegarderPresenceStage,
     sauvegarderLigneBudgetMensuel, supprimerLigneBudgetMensuel, sauvegarderRepartition,
     sauvegarderRegroupement, supprimerRegroupement, sauvegarderIndyTotal, sauvegarderAtterrissage, sauvegarderAtterrissageLigne, toggleMoisClos,
-    sauvegarderCompteMapping, importerFEC,
+    sauvegarderCompteMapping, importerFEC, sauvegarderAutreRecette, supprimerAutreRecette,
     definirParametre,
     importerLot,
     mettreAJourMembres,
