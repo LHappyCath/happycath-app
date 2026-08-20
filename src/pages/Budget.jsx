@@ -907,9 +907,10 @@ function BlocRegroupementReel({ regroupement, nom, lignes, indyRow, avecIndy, ou
   )
 }
 
-// Ligne d'atterrissage pour un regroupement : verrouillée (réel) sur les mois clos,
-// éditable (défaut = prévisionnel) sur les mois ouverts.
-function LigneAtterrissage({ nom, valeursReel, valeursPrev, moisClos, override, onSave }) {
+// Ligne d'atterrissage pour une ligne miroir (Prévisionnel/Réel appariées via leur
+// lien) : verrouillée (réel) sur les mois clos, éditable (défaut = prévisionnel) sur
+// les mois ouverts.
+function LigneAtterrissagePaire({ libelle, valeursReel, valeursPrev, moisClos, override, onSave }) {
   const [local, setLocal] = useState(() => Object.fromEntries(MOIS_CLES.map((m,i) => [m, (override && override[m] != null) ? override[m] : valeursPrev[i]])))
   useEffect(() => {
     setLocal(Object.fromEntries(MOIS_CLES.map((m,i) => [m, (override && override[m] != null) ? override[m] : valeursPrev[i]])))
@@ -926,7 +927,7 @@ function LigneAtterrissage({ nom, valeursReel, valeursPrev, moisClos, override, 
 
   return (
     <tr>
-      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>{nom}</td>
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, whiteSpace:'nowrap', position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>{libelle}</td>
       {MOIS_CLES.map((m,i) => moisClos[m] ? (
         <td key={m} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', color:'#888' }}>{valeursReel[i] ? fmtEuros(valeursReel[i]) : '—'}</td>
       ) : (
@@ -939,6 +940,32 @@ function LigneAtterrissage({ nom, valeursReel, valeursPrev, moisClos, override, 
       <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, textAlign:'right', whiteSpace:'nowrap' }}>{fmtEuros(total)}</td>
       <td />
     </tr>
+  )
+}
+
+// Bloc d'un regroupement dans la vue Atterrissage : sous-total (somme des lignes
+// affichées), dépliable pour ajuster chaque ligne miroir individuellement.
+function BlocRegroupementAtterrissage({ nom, paires, moisClos, overridesParCle, ouvert, onToggle, onSaveLigne }) {
+  const valeursParPaire = paires.map(p => MOIS_CLES.map((m,i) => moisClos[m] ? p.valeursReel[i] : (() => {
+    const ov = overridesParCle[p.key]
+    return (ov && ov[m] != null) ? Number(ov[m]) : p.valeursPrev[i]
+  })()))
+  const sousTotal = MOIS_CLES.map((_,i) => valeursParPaire.reduce((s,v) => s + v[i], 0))
+  return (
+    <>
+      <tr onClick={onToggle} style={{ cursor:'pointer', background:'#f7f7f8' }}>
+        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8', ...COL_LIBELLE }}>
+          {ouvert ? '▾' : '▸'} {nom} <span style={{ color:'#aaa', fontWeight:400 }}>({paires.length})</span>
+        </td>
+        {sousTotal.map((v,i) => <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', fontWeight:600 }}>{v ? fmtEuros(v) : '—'}</td>)}
+        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:700, textAlign:'right' }}>{fmtEuros(sousTotal.reduce((s,v)=>s+v,0))}</td>
+        <td />
+      </tr>
+      {ouvert && paires.map(p => (
+        <LigneAtterrissagePaire key={p.key} libelle={p.libelle} valeursReel={p.valeursReel} valeursPrev={p.valeursPrev}
+          moisClos={moisClos} override={overridesParCle[p.key]} onSave={(champ)=>onSaveLigne(p.key, champ)} />
+      ))}
+    </>
   )
 }
 
@@ -1065,9 +1092,9 @@ function EnteteTableau({ label }) {
 function OngletMensuel({ saison, showToast }) {
   const {
     cours, budgetCoursPrevisionnel, budgetPrevisionnel, budgetReel, budgetRepartition,
-    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetMoisClos, parametres,
+    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetAtterrissageLignes, budgetMoisClos, parametres,
     sauvegarderLigneBudgetMensuel, supprimerLigneBudgetMensuel, sauvegarderRepartition,
-    sauvegarderIndyTotal, sauvegarderAtterrissage, toggleMoisClos,
+    sauvegarderIndyTotal, sauvegarderAtterrissage, sauvegarderAtterrissageLigne, toggleMoisClos,
   } = useData()
   const [vue, setVue] = useState('previsionnel')
   const [ouvertes, setOuvertes] = useState({ Gym: false, Danse: false })
@@ -1232,20 +1259,27 @@ function OngletMensuel({ saison, showToast }) {
     if (res?.error) showToast('Erreur : ' + res.error)
   }
 
-  async function handleSaveAtterrissage(regroupementId, champ) {
-    const res = await sauvegarderAtterrissage(regroupementId, saison, champ)
+  async function handleSaveAtterrissageLigne(lien, champ) {
+    const res = await sauvegarderAtterrissageLigne(lien, saison, champ)
     if (res?.error) showToast('Erreur : ' + res.error)
   }
 
-  // Atterrissage : solde global (somme des regroupements, mêlant réel verrouillé et prévisionnel ajusté)
+  // Atterrissage ligne à ligne : pour chaque ligne miroir, valeur = réel si le mois
+  // est clos, sinon l'ajustement saisi ou, par défaut, le prévisionnel de la ligne.
+  const overridesAtterrissageParCle = useMemo(() => Object.fromEntries(
+    budgetAtterrissageLignes.filter(a => a.saison === saison).map(a => [a.lien, a])
+  ), [budgetAtterrissageLignes, saison])
+
   function valeursAtterrissage(regroupementId, type) {
-    const valeursPrev = referencePrevisionnelle(regroupementId, type)
-    const valeursReel = totalParMois(lignesReelDuRegroupement(regroupementId, type))
-    const override = budgetAtterrissage.find(a => a.regroupement_id === regroupementId && a.saison === saison)
-    return MOIS_CLES.map((m,i) => moisClos[m] ? valeursReel[i] : ((override && override[m] != null) ? Number(override[m]) : valeursPrev[i]))
+    const paires = pairesDuRegroupement(regroupementId, type)
+    return MOIS_CLES.map((m,i) => paires.reduce((s,p) => {
+      const ov = overridesAtterrissageParCle[p.key]
+      const v = moisClos[m] ? p.valeursReel[i] : ((ov && ov[m] != null) ? Number(ov[m]) : p.valeursPrev[i])
+      return s + v
+    }, 0))
   }
-  const totalAtterrissageRecette = regroupementsRecette.map(r => valeursAtterrissage(r.id, 'recette'))
-  const totalAtterrissageCharge = regroupementsCharge.map(r => valeursAtterrissage(r.id, 'charge'))
+  const totalAtterrissageRecette = [...regroupementsRecette, { id: null }].map(r => valeursAtterrissage(r.id, 'recette'))
+  const totalAtterrissageCharge = [...regroupementsCharge, { id: null }].map(r => valeursAtterrissage(r.id, 'charge'))
   const sommeAtterrissageRecette = MOIS_CLES.map((_,i) => totalAtterrissageRecette.reduce((s,v) => s + v[i], 0))
   const sommeAtterrissageCharge = MOIS_CLES.map((_,i) => totalAtterrissageCharge.reduce((s,v) => s + v[i], 0))
   const soldeAtterrissageMois = sommeAtterrissageRecette.map((r,i) => r - sommeAtterrissageCharge[i])
@@ -1430,14 +1464,16 @@ function OngletMensuel({ saison, showToast }) {
           <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed' }}>
             <EnteteTableau label="Recettes (atterrissage)" />
             <tbody>
-              {regroupementsRecette.map(r => (
-                <LigneAtterrissage key={r.id} nom={r.nom}
-                  valeursReel={totalParMois(lignesReelDuRegroupement(r.id, 'recette'))}
-                  valeursPrev={referencePrevisionnelle(r.id, 'recette')}
-                  moisClos={moisClos}
-                  override={budgetAtterrissage.find(a => a.regroupement_id === r.id && a.saison === saison)}
-                  onSave={(champ)=>handleSaveAtterrissage(r.id, champ)} />
-              ))}
+              {[...regroupementsRecette, { id: null, nom: 'Non classé' }].map(r => {
+                const paires = pairesDuRegroupement(r.id, 'recette')
+                if (paires.length === 0) return null
+                return (
+                  <BlocRegroupementAtterrissage key={r.id || 'nonclasse'} nom={r.nom} paires={paires} moisClos={moisClos}
+                    overridesParCle={overridesAtterrissageParCle}
+                    ouvert={!!ouvertes['a_r_'+(r.id||'nonclasse')]} onToggle={()=>setOuvertes(o=>({...o, ['a_r_'+(r.id||'nonclasse')]: !o['a_r_'+(r.id||'nonclasse')]}))}
+                    onSaveLigne={handleSaveAtterrissageLigne} />
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -1448,14 +1484,16 @@ function OngletMensuel({ saison, showToast }) {
           <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed' }}>
             <EnteteTableau label="Charges (atterrissage)" />
             <tbody>
-              {regroupementsCharge.map(r => (
-                <LigneAtterrissage key={r.id} nom={r.nom}
-                  valeursReel={totalParMois(lignesReelDuRegroupement(r.id, 'charge'))}
-                  valeursPrev={referencePrevisionnelle(r.id, 'charge')}
-                  moisClos={moisClos}
-                  override={budgetAtterrissage.find(a => a.regroupement_id === r.id && a.saison === saison)}
-                  onSave={(champ)=>handleSaveAtterrissage(r.id, champ)} />
-              ))}
+              {[...regroupementsCharge, { id: null, nom: 'Non classé' }].map(r => {
+                const paires = pairesDuRegroupement(r.id, 'charge')
+                if (paires.length === 0) return null
+                return (
+                  <BlocRegroupementAtterrissage key={r.id || 'nonclasse'} nom={r.nom} paires={paires} moisClos={moisClos}
+                    overridesParCle={overridesAtterrissageParCle}
+                    ouvert={!!ouvertes['a_c_'+(r.id||'nonclasse')]} onToggle={()=>setOuvertes(o=>({...o, ['a_c_'+(r.id||'nonclasse')]: !o['a_c_'+(r.id||'nonclasse')]}))}
+                    onSaveLigne={handleSaveAtterrissageLigne} />
+                )
+              })}
             </tbody>
           </table>
         </div>
