@@ -342,23 +342,25 @@ function OngletRecettes({ saison, showToast }) {
 }
 
 // ─── FORMULAIRE : PÉRIODE EXCEPTIONNELLE ────────────────────────────
-function FormPeriode({ saison, onClose, showToast }) {
+function FormPeriode({ saison, initial, onClose, showToast }) {
   const { sauvegarderJourExceptionnel } = useData()
-  const [form, setForm] = useState({ libelle:'', date_debut:'', date_fin:'', statut:'ferme' })
+  const [form, setForm] = useState(() => initial
+    ? { libelle: initial.libelle, date_debut: initial.date_debut, date_fin: initial.date_fin, statut: initial.statut }
+    : { libelle:'', date_debut:'', date_fin:'', statut:'ferme' })
   const [saving, setSaving] = useState(false)
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
   async function save() {
     if (!form.libelle.trim() || !form.date_debut || !form.date_fin) return
     setSaving(true)
-    const res = await sauvegarderJourExceptionnel({ saison, ...form })
+    const res = await sauvegarderJourExceptionnel(initial ? { ...initial, ...form } : { saison, ...form })
     setSaving(false)
     if (res?.error) { showToast('Erreur : ' + res.error); return }
     onClose()
   }
 
   return (
-    <Modal titre="Nouvelle période exceptionnelle" onClose={onClose}>
+    <Modal titre={initial ? 'Modifier la période exceptionnelle' : 'Nouvelle période exceptionnelle'} onClose={onClose}>
       <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
         <div>
           <label style={LABEL}>Libellé *</label>
@@ -380,7 +382,7 @@ function FormPeriode({ saison, onClose, showToast }) {
         <div style={{ display:'flex', gap:8, paddingTop:4 }}>
           <button style={{ ...BTN.ghost, flex:1 }} onClick={onClose}>Annuler</button>
           <button style={{ ...BTN.primary, flex:2, opacity:saving?0.7:1 }} disabled={saving} onClick={save}>
-            {saving ? 'Enregistrement…' : 'Ajouter'}
+            {saving ? 'Enregistrement…' : (initial ? 'Enregistrer' : 'Ajouter')}
           </button>
         </div>
       </div>
@@ -529,8 +531,9 @@ function OngletTarifs({ saison, showToast }) {
 
 // ─── ONGLET CALENDRIER ANNUEL ────────────────────────────────────────
 function OngletCalendrier({ saison, showToast }) {
-  const { saisonsCalendrier, joursExceptionnels, sauvegarderSaisonCalendrier, sauvegarderJourExceptionnel, supprimerJourExceptionnel } = useData()
+  const { cours, saisonsCalendrier, joursExceptionnels, sauvegarderSaisonCalendrier, sauvegarderJourExceptionnel, supprimerJourExceptionnel } = useData()
   const [showPeriode, setShowPeriode] = useState(false)
+  const [periodeEditee, setPeriodeEditee] = useState(null)
   const [generation, setGeneration] = useState(false)
 
   const saisonCal = saisonsCalendrier.find(s => s.saison === saison)
@@ -540,6 +543,34 @@ function OngletCalendrier({ saison, showToast }) {
     joursExceptionnels.filter(j => j.saison === saison).sort((a,b) => a.date_debut.localeCompare(b.date_debut)),
     [joursExceptionnels, saison]
   )
+
+  // Récap du nombre de séances par cours (regroupé par nom + catégorie), pour repérer
+  // d'un coup d'œil les cours qui n'ont pas le même nombre de séances que les autres
+  // de leur catégorie (utile pour ajuster les périodes exceptionnelles ci-dessus).
+  const recapSeances = useMemo(() => {
+    const groupes = {}
+    for (const c of cours) {
+      if (c.categorie !== 'Gym' && c.categorie !== 'Danse') continue
+      const cle = c.categorie + '|' + c.nom
+      if (!groupes[cle]) groupes[cle] = { categorie: c.categorie, nom: c.nom, nbCreneaux: 0, seances: 0 }
+      groupes[cle].nbCreneaux += 1
+      groupes[cle].seances += compterSeances({
+        coursJour: c.jour, categorie: c.categorie,
+        dateDebut: bornes.date_debut, dateFin: bornes.date_fin,
+        joursExceptionnels: joursExceptionnelsSaison,
+      })
+    }
+    const lignes = Object.values(groupes).sort((a,b) => a.categorie.localeCompare(b.categorie) || a.nom.localeCompare(b.nom))
+    // Valeur de référence par catégorie = nombre de séances le plus fréquent
+    const referenceParCategorie = {}
+    for (const cat of ['Gym', 'Danse']) {
+      const compte = {}
+      for (const l of lignes) { if (l.categorie === cat) compte[l.seances] = (compte[l.seances]||0) + 1 }
+      const entries = Object.entries(compte)
+      referenceParCategorie[cat] = entries.length ? Number(entries.sort((a,b)=>b[1]-a[1])[0][0]) : null
+    }
+    return lignes.map(l => ({ ...l, reference: referenceParCategorie[l.categorie] }))
+  }, [cours, bornes.date_debut, bornes.date_fin, joursExceptionnelsSaison])
 
   async function enregistrerBornes() {
     const res = await sauvegarderSaisonCalendrier(saison, bornes.date_debut, bornes.date_fin)
@@ -613,6 +644,7 @@ function OngletCalendrier({ saison, showToast }) {
               <option value="ferme">Fermé</option>
               <option value="gym_uniquement">Gym uniquement</option>
             </select>
+            <button onClick={()=>setPeriodeEditee(j)} title="Modifier" style={{ background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:13 }}>✏️</button>
             <button onClick={()=>supprimer(j.id)} style={{ background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:14 }}>🗑</button>
           </div>
         ))}
@@ -657,7 +689,48 @@ function OngletCalendrier({ saison, showToast }) {
         })}
       </div>
 
+      <div className="card" style={{ padding:18, marginTop:20 }}>
+        <p style={{ fontSize:12, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>
+          Récap — nombre de séances par cours
+        </p>
+        <p style={{ fontSize:12, color:'#aaa', marginBottom:10 }}>
+          Calculé à partir des bornes de saison et des périodes exceptionnelles ci-dessus. La colonne "Écart" repère les cours qui n'ont pas le nombre de séances le plus fréquent de leur catégorie.
+        </p>
+        {recapSeances.length === 0 ? (
+          <p style={{ fontSize:13, color:'#aaa' }}>Aucun cours Gym/Danse trouvé.</p>
+        ) : (
+          <table style={{ borderCollapse:'collapse', width:'100%' }}>
+            <thead>
+              <tr>
+                <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888', textAlign:'left' }}>Catégorie</th>
+                <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888', textAlign:'left' }}>Cours</th>
+                <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888' }}>Créneaux</th>
+                <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888' }}>Séances</th>
+                <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888' }}>Écart</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recapSeances.map(l => {
+                const ecart = l.seances - (l.reference ?? l.seances)
+                return (
+                  <tr key={l.categorie + '|' + l.nom} style={{ borderTop:'0.5px solid #f5f5f5' }}>
+                    <td style={{ padding:'6px 8px', fontSize:12, color:'#888' }}>{l.categorie}</td>
+                    <td style={{ padding:'6px 8px', fontSize:13, fontWeight:500 }}>{l.nom}</td>
+                    <td style={{ padding:'6px 8px', fontSize:12, textAlign:'center' }}>{l.nbCreneaux}</td>
+                    <td style={{ padding:'6px 8px', fontSize:12, textAlign:'center', fontWeight:600 }}>{l.seances}</td>
+                    <td style={{ padding:'6px 8px', fontSize:12, textAlign:'center', fontWeight:600, color: ecart === 0 ? '#1D9E75' : '#D85A30' }}>
+                      {ecart === 0 ? '✓' : (ecart > 0 ? `+${ecart}` : ecart)}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
       {showPeriode && <FormPeriode saison={saison} onClose={()=>setShowPeriode(false)} showToast={showToast} />}
+      {periodeEditee && <FormPeriode saison={saison} initial={periodeEditee} onClose={()=>setPeriodeEditee(null)} showToast={showToast} />}
     </div>
   )
 }
