@@ -815,24 +815,60 @@ export function DataProvider({ children }) {
     return table === 'budget_reel' ? [budgetReel, setBudgetReel] : [budgetPrevisionnel, setBudgetPrevisionnel]
   }
 
+  const MOIS_CLES_BUDGET = ['aout','septembre','octobre','novembre','decembre','janvier','fevrier','mars','avril','mai','juin','juillet']
+  function zerosMoisStore() { return Object.fromEntries(MOIS_CLES_BUDGET.map(m => [m, 0])) }
+
+  // Chaque ligne libre (recette/charge) est reliée à sa "ligne miroir" dans l'autre
+  // table (prévisionnel <-> réel) via le champ `lien`, pour permettre la comparaison
+  // ligne à ligne. À la création, on crée la ligne miroir (à zéro) automatiquement ;
+  // à la modification du libellé/regroupement/entité, on répercute sur le miroir sans
+  // jamais toucher aux montants déjà saisis dans l'autre table.
   async function sauvegarderLigneBudgetMensuel(table, payload) {
     const [lignes, setLignes] = stateEtSetter(table)
+    const autreTable = table === 'budget_reel' ? 'budget_previsionnel' : 'budget_reel'
+    const [autreLignes, setAutreLignes] = stateEtSetter(autreTable)
     const isNew = !payload.id
-    const data = { saison: saisonActive, entite: 'Asso', ...payload }
+    const lien = payload.lien || ('bl' + Date.now().toString(36))
+    const data = { saison: saisonActive, entite: 'Asso', ...payload, lien }
+
+    let res
     if (isNew) {
       const temp = { ...data, id: `temp-${Date.now()}` }
-      return insert(table, data, () => setLignes(prev => [...prev, temp]))
+      res = await insert(table, data, () => setLignes(prev => [...prev, temp]))
+    } else {
+      res = await upsert(table, data, () => setLignes(prev => prev.map(l => l.id === data.id ? { ...l, ...data } : l)))
     }
-    return upsert(table, data, () => setLignes(prev => prev.map(l => l.id === data.id ? { ...l, ...data } : l)))
+
+    const cible = autreLignes.find(l => l.lien === lien)
+    if (!cible) {
+      const miroir = { type: data.type, saison: data.saison, libelle: data.libelle, regroupement_id: data.regroupement_id, entite: data.entite, lien, ...zerosMoisStore() }
+      const tempM = { ...miroir, id: `temp-${Date.now()}-m` }
+      await insert(autreTable, miroir, () => setAutreLignes(prev => [...prev, tempM]))
+    } else if (!isNew) {
+      const champsPartages = { id: cible.id, libelle: data.libelle, regroupement_id: data.regroupement_id, entite: data.entite, lien }
+      await upsert(autreTable, champsPartages, () => setAutreLignes(prev => prev.map(l => l.id === cible.id ? { ...l, ...champsPartages } : l)))
+    }
+
+    return res
   }
 
-  async function supprimerLigneBudgetMensuel(table, id) {
+  async function supprimerLigneBudgetMensuel(table, id, supprimerMiroir) {
     const [, setLignes] = stateEtSetter(table)
+    const autreTable = table === 'budget_reel' ? 'budget_previsionnel' : 'budget_reel'
+    const [autreLignes, setAutreLignes] = stateEtSetter(autreTable)
+    const ligne = (table === 'budget_reel' ? budgetReel : budgetPrevisionnel).find(l => l.id === id)
     if (!navigator.onLine) return { offline: true }
     try {
       const { error } = await supabase.from(table).delete().eq('id', id)
       if (error) throw error
       setLignes(prev => prev.filter(l => l.id !== id))
+      if (supprimerMiroir && ligne?.lien) {
+        const cible = autreLignes.find(l => l.lien === ligne.lien)
+        if (cible) {
+          await supabase.from(autreTable).delete().eq('id', cible.id)
+          setAutreLignes(prev => prev.filter(l => l.id !== cible.id))
+        }
+      }
       return { success: true }
     } catch(e) {
       return { error: e.message || 'Erreur lors de la suppression' }
