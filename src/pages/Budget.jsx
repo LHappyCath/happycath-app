@@ -531,10 +531,11 @@ function OngletTarifs({ saison, showToast }) {
 
 // ─── ONGLET CALENDRIER ANNUEL ────────────────────────────────────────
 function OngletCalendrier({ saison, showToast }) {
-  const { cours, saisonsCalendrier, joursExceptionnels, sauvegarderSaisonCalendrier, sauvegarderJourExceptionnel, supprimerJourExceptionnel } = useData()
+  const { cours, saisonsCalendrier, joursExceptionnels, budgetCoursPrevisionnel, sauvegarderSaisonCalendrier, sauvegarderJourExceptionnel, supprimerJourExceptionnel, sauvegarderBudgetCours } = useData()
   const [showPeriode, setShowPeriode] = useState(false)
   const [periodeEditee, setPeriodeEditee] = useState(null)
   const [generation, setGeneration] = useState(false)
+  const [majPlanning, setMajPlanning] = useState(false)
 
   const saisonCal = saisonsCalendrier.find(s => s.saison === saison)
   const [bornes, setBornes] = useState(() => saisonCal || { date_debut: defautBornes(saison).debut, date_fin: defautBornes(saison).fin })
@@ -544,33 +545,45 @@ function OngletCalendrier({ saison, showToast }) {
     [joursExceptionnels, saison]
   )
 
-  // Récap du nombre de séances par cours (regroupé par nom + catégorie), pour repérer
-  // d'un coup d'œil les cours qui n'ont pas le même nombre de séances que les autres
-  // de leur catégorie (utile pour ajuster les périodes exceptionnelles ci-dessus).
-  const recapSeances = useMemo(() => {
-    const groupes = {}
-    for (const c of cours) {
-      if (c.categorie !== 'Gym' && c.categorie !== 'Danse') continue
-      const cle = c.categorie + '|' + c.nom
-      if (!groupes[cle]) groupes[cle] = { categorie: c.categorie, nom: c.nom, nbCreneaux: 0, seances: 0 }
-      groupes[cle].nbCreneaux += 1
-      groupes[cle].seances += compterSeances({
-        coursJour: c.jour, categorie: c.categorie,
-        dateDebut: bornes.date_debut, dateFin: bornes.date_fin,
-        joursExceptionnels: joursExceptionnelsSaison,
-      })
-    }
-    const lignes = Object.values(groupes).sort((a,b) => a.categorie.localeCompare(b.categorie) || a.nom.localeCompare(b.nom))
-    // Valeur de référence par catégorie = nombre de séances le plus fréquent
-    const referenceParCategorie = {}
+  // Récap du nombre de séances par créneau (chaque cours = 1 créneau, pas de regroupement
+  // par nom), groupé par catégorie, avec le mini/maxi de la catégorie pour repérer les
+  // créneaux qui n'ont pas le même nombre de séances que les autres.
+  const recapCreneaux = useMemo(() => {
+    const lignes = cours
+      .filter(c => c.categorie === 'Gym' || c.categorie === 'Danse')
+      .map(c => ({
+        id: c.id, categorie: c.categorie, nom: c.nom, jour: c.jour, heure: c.heure,
+        seances: compterSeances({
+          coursJour: c.jour, categorie: c.categorie,
+          dateDebut: bornes.date_debut, dateFin: bornes.date_fin,
+          joursExceptionnels: joursExceptionnelsSaison,
+        }),
+      }))
+      .sort((a,b) => a.categorie.localeCompare(b.categorie) || (a.jour - b.jour) || (a.heure||'').localeCompare(b.heure||''))
+    const statsParCategorie = {}
     for (const cat of ['Gym', 'Danse']) {
-      const compte = {}
-      for (const l of lignes) { if (l.categorie === cat) compte[l.seances] = (compte[l.seances]||0) + 1 }
-      const entries = Object.entries(compte)
-      referenceParCategorie[cat] = entries.length ? Number(entries.sort((a,b)=>b[1]-a[1])[0][0]) : null
+      const valeurs = lignes.filter(l => l.categorie === cat).map(l => l.seances)
+      statsParCategorie[cat] = valeurs.length ? { min: Math.min(...valeurs), max: Math.max(...valeurs) } : null
     }
-    return lignes.map(l => ({ ...l, reference: referenceParCategorie[l.categorie] }))
+    return { lignes, statsParCategorie }
   }, [cours, bornes.date_debut, bornes.date_fin, joursExceptionnelsSaison])
+
+  // Recalcule et enregistre le nombre de séances de chaque créneau (Gym/Danse) pour la
+  // saison — à relancer après avoir créé/modifié des périodes exceptionnelles, pour que
+  // le planning (utilisé pour le CA prévu dans Tarifs) reste à jour.
+  async function mettreAJourPlanning() {
+    setMajPlanning(true)
+    let nb = 0
+    for (const l of recapCreneaux.lignes) {
+      const budget = budgetCoursPrevisionnel.find(b => b.cours_id === l.id && b.saison === saison)
+      if (budget?.nb_seances_prevues === l.seances) continue
+      const res = await sauvegarderBudgetCours({ cours_id: l.id, saison, nb_seances_prevues: l.seances })
+      if (res?.error) { showToast('Erreur : ' + res.error); setMajPlanning(false); return }
+      nb++
+    }
+    setMajPlanning(false)
+    showToast(nb > 0 ? `Planning mis à jour (${nb} créneau${nb>1?'x':''})` : 'Planning déjà à jour')
+  }
 
   async function enregistrerBornes() {
     const res = await sauvegarderSaisonCalendrier(saison, bornes.date_debut, bornes.date_fin)
@@ -690,42 +703,52 @@ function OngletCalendrier({ saison, showToast }) {
       </div>
 
       <div className="card" style={{ padding:18, marginTop:20 }}>
-        <p style={{ fontSize:12, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:10 }}>
-          Récap — nombre de séances par cours
-        </p>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', flexWrap:'wrap', gap:8, marginBottom:10 }}>
+          <p style={{ fontSize:12, fontWeight:500, color:'#888', textTransform:'uppercase', letterSpacing:'0.06em', margin:0 }}>
+            Récap — nombre de séances par créneau
+          </p>
+          <button style={BTN.ghost} disabled={majPlanning} onClick={mettreAJourPlanning}>
+            {majPlanning ? 'Mise à jour…' : '🔄 Mettre à jour le planning'}
+          </button>
+        </div>
         <p style={{ fontSize:12, color:'#aaa', marginBottom:10 }}>
-          Calculé à partir des bornes de saison et des périodes exceptionnelles ci-dessus. La colonne "Écart" repère les cours qui n'ont pas le nombre de séances le plus fréquent de leur catégorie.
+          Un cours = un créneau (pas de regroupement par nom), calculé à partir des bornes de saison et des périodes exceptionnelles ci-dessus. Le bouton enregistre ce nombre de séances dans le planning de chaque créneau (utilisé pour le CA prévu dans Tarifs) — à relancer après toute modification ou création de période exceptionnelle.
         </p>
-        {recapSeances.length === 0 ? (
+        {recapCreneaux.lignes.length === 0 ? (
           <p style={{ fontSize:13, color:'#aaa' }}>Aucun cours Gym/Danse trouvé.</p>
         ) : (
-          <table style={{ borderCollapse:'collapse', width:'100%' }}>
-            <thead>
-              <tr>
-                <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888', textAlign:'left' }}>Catégorie</th>
-                <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888', textAlign:'left' }}>Cours</th>
-                <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888' }}>Créneaux</th>
-                <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888' }}>Séances</th>
-                <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888' }}>Écart</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recapSeances.map(l => {
-                const ecart = l.seances - (l.reference ?? l.seances)
-                return (
-                  <tr key={l.categorie + '|' + l.nom} style={{ borderTop:'0.5px solid #f5f5f5' }}>
-                    <td style={{ padding:'6px 8px', fontSize:12, color:'#888' }}>{l.categorie}</td>
-                    <td style={{ padding:'6px 8px', fontSize:13, fontWeight:500 }}>{l.nom}</td>
-                    <td style={{ padding:'6px 8px', fontSize:12, textAlign:'center' }}>{l.nbCreneaux}</td>
-                    <td style={{ padding:'6px 8px', fontSize:12, textAlign:'center', fontWeight:600 }}>{l.seances}</td>
-                    <td style={{ padding:'6px 8px', fontSize:12, textAlign:'center', fontWeight:600, color: ecart === 0 ? '#1D9E75' : '#D85A30' }}>
-                      {ecart === 0 ? '✓' : (ecart > 0 ? `+${ecart}` : ecart)}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          ['Gym', 'Danse'].map(cat => {
+            const lignes = recapCreneaux.lignes.filter(l => l.categorie === cat)
+            if (lignes.length === 0) return null
+            const stats = recapCreneaux.statsParCategorie[cat]
+            return (
+              <div key={cat} style={{ marginBottom:18 }}>
+                <p style={{ fontSize:13, fontWeight:600, margin:'0 0 6px' }}>
+                  {cat} <span style={{ color:'#888', fontWeight:400 }}>— mini {stats.min}, maxi {stats.max}{stats.min !== stats.max ? ` (écart ${stats.max - stats.min})` : ''}</span>
+                </p>
+                <table style={{ borderCollapse:'collapse', width:'100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888', textAlign:'left' }}>Cours</th>
+                      <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888', textAlign:'left' }}>Créneau</th>
+                      <th style={{ padding:'4px 8px', fontSize:11, fontWeight:500, color:'#888' }}>Séances</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lignes.map(l => (
+                      <tr key={l.id} style={{ borderTop:'0.5px solid #f5f5f5' }}>
+                        <td style={{ padding:'6px 8px', fontSize:13, fontWeight:500 }}>{l.nom}</td>
+                        <td style={{ padding:'6px 8px', fontSize:12, color:'#888' }}>{JOURS_FULL[l.jour]} {l.heure}</td>
+                        <td style={{ padding:'6px 8px', fontSize:12, textAlign:'center', fontWeight:600, color: l.seances === stats.min && stats.min !== stats.max ? '#D85A30' : '#1a1a1a' }}>
+                          {l.seances}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          })
         )}
       </div>
 
