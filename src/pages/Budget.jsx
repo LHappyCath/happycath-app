@@ -671,8 +671,8 @@ function fmtEurosSigne(n) {
 }
 
 // Formulaire pour créer une nouvelle ligne libre (recette ou charge)
-function FormLigneBudget({ type, onClose, onCree }) {
-  const [form, setForm] = useState({ categorie:'', libelle:'', entite:'Asso' })
+function FormLigneBudget({ type, regroupements, regroupementParDefaut, onClose, onCree }) {
+  const [form, setForm] = useState({ regroupement_id: regroupementParDefaut || '', libelle:'', entite:'Asso' })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
   return (
     <Modal titre={type === 'recette' ? 'Nouvelle ligne de recette' : 'Nouvelle ligne de charge'} onClose={onClose}>
@@ -683,8 +683,11 @@ function FormLigneBudget({ type, onClose, onCree }) {
             placeholder={type==='recette' ? 'ex: Stages, Adhésions...' : 'ex: Loyer, Salaires...'} />
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-          <div><label style={LABEL}>Catégorie</label>
-            <input style={INPUT} value={form.categorie} onChange={e=>set('categorie',e.target.value)} placeholder="optionnel" /></div>
+          <div><label style={LABEL}>Regroupement Indy</label>
+            <select style={INPUT} value={form.regroupement_id} onChange={e=>set('regroupement_id',e.target.value)}>
+              <option value="">Non classé</option>
+              {regroupements.map(r => <option key={r.id} value={r.id}>{r.nom}</option>)}
+            </select></div>
           <div><label style={LABEL}>Entité</label>
             <select style={INPUT} value={form.entite} onChange={e=>set('entite',e.target.value)}>
               <option value="Asso">Asso</option>
@@ -694,7 +697,7 @@ function FormLigneBudget({ type, onClose, onCree }) {
         <div style={{ display:'flex', gap:8, paddingTop:4 }}>
           <button style={{ ...BTN.ghost, flex:1 }} onClick={onClose}>Annuler</button>
           <button style={{ ...BTN.primary, flex:2 }} disabled={!form.libelle.trim()}
-            onClick={()=>onCree(form)}>Ajouter</button>
+            onClick={()=>onCree({ ...form, regroupement_id: form.regroupement_id || null })}>Ajouter</button>
         </div>
       </div>
     </Modal>
@@ -702,7 +705,7 @@ function FormLigneBudget({ type, onClose, onCree }) {
 }
 
 // Une ligne éditable (mois par mois) dans un tableau prévisionnel/réel
-function LigneMensuelle({ ligne, onSave, onDelete }) {
+function LigneMensuelle({ ligne, nomRegroupement, onSave, onDelete }) {
   const [local, setLocal] = useState(() => Object.fromEntries(MOIS_CLES.map(m => [m, ligne[m] ?? 0])))
   function setMois(m, v) { setLocal(l => ({ ...l, [m]: v })) }
   function blurMois(m) {
@@ -713,7 +716,7 @@ function LigneMensuelle({ ligne, onSave, onDelete }) {
     <tr>
       <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, whiteSpace:'nowrap', position:'sticky', left:0, background:'#fff' }}>
         {ligne.libelle}
-        {ligne.categorie && <span style={{ color:'#aaa', fontWeight:400 }}> · {ligne.categorie}</span>}
+        {nomRegroupement && <span style={{ color:'#aaa', fontWeight:400 }}> · {nomRegroupement}</span>}
       </td>
       {MOIS_CLES.map(m => (
         <td key={m} style={{ padding:'2px 3px' }}>
@@ -730,8 +733,36 @@ function LigneMensuelle({ ligne, onSave, onDelete }) {
   )
 }
 
+// Ligne éditable (mois par mois) pour la saisie d'un total de contrôle Indy
+function LigneIndyTotal({ valeurs, onSave }) {
+  const [local, setLocal] = useState(() => Object.fromEntries(MOIS_CLES.map(m => [m, valeurs[m] ?? 0])))
+  useEffect(() => { setLocal(Object.fromEntries(MOIS_CLES.map(m => [m, valeurs[m] ?? 0]))) }, [valeurs])
+  function setMois(m, v) { setLocal(l => ({ ...l, [m]: v })) }
+  function blurMois(m) {
+    const val = parseFloat(local[m]) || 0
+    if (val !== Number(valeurs[m]||0)) onSave({ [m]: val })
+  }
+  return (
+    <tr>
+      <td style={{ padding:'6px 8px', fontSize:11, fontStyle:'italic', color:'#888', position:'sticky', left:0, background:'#fff' }}>
+        Total Indy (saisie manuelle)
+      </td>
+      {MOIS_CLES.map(m => (
+        <td key={m} style={{ padding:'2px 3px' }}>
+          <input type="number" step="0.01" value={local[m]}
+            onChange={e=>setMois(m, e.target.value)} onBlur={()=>blurMois(m)}
+            style={{ width:64, padding:'5px 6px', borderRadius:6, border:'1px solid #378ADD50', background:'#378ADD08', fontSize:12, textAlign:'right' }} />
+        </td>
+      ))}
+      <td style={{ padding:'6px 8px', fontSize:12, textAlign:'right', whiteSpace:'nowrap', color:'#888' }}>{fmtEuros(totalLigne(local))}</td>
+      <td />
+    </tr>
+  )
+}
+
 // Ligne calculée (lecture seule) pour une catégorie de cours ou un cours en détail
-function LigneCalculee({ libelle, valeurs, sousLigne, fort }) {
+function LigneCalculee({ libelle, valeurs, sousLigne, fort, totalAffiche }) {
+  const total = totalAffiche !== undefined ? totalAffiche : valeurs.reduce((s,v)=>s+v,0)
   return (
     <tr>
       <td style={{ padding:'6px 8px', fontSize:12, fontWeight:fort?600:500, color:sousLigne?'#888':'#1a1a1a', paddingLeft:sousLigne?24:8, position:'sticky', left:0, background:'#fff' }}>
@@ -740,9 +771,184 @@ function LigneCalculee({ libelle, valeurs, sousLigne, fort }) {
       {valeurs.map((v,i) => (
         <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', color:sousLigne?'#aaa':'#666' }}>{v ? fmtEuros(v) : '—'}</td>
       ))}
-      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:fort?700:600, textAlign:'right', whiteSpace:'nowrap' }}>{fmtEuros(valeurs.reduce((s,v)=>s+v,0))}</td>
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:fort?700:600, textAlign:'right', whiteSpace:'nowrap' }}>{fmtEuros(total)}</td>
       <td />
     </tr>
+  )
+}
+
+// Ligne d'écart (Indy - somme des lignes), colorée
+function LigneEcart({ valeurs }) {
+  return (
+    <tr>
+      <td style={{ padding:'6px 8px', fontSize:11, color:'#888', position:'sticky', left:0, background:'#fff' }}>Écart</td>
+      {valeurs.map((v,i) => (
+        <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', fontWeight:600, color: Math.abs(v)<0.01 ? '#1D9E75' : '#D85A30' }}>
+          {Math.abs(v)<0.01 ? '✓' : fmtEurosSigne(v)}
+        </td>
+      ))}
+      <td /><td />
+    </tr>
+  )
+}
+
+// Bloc d'un regroupement dans la vue Réel : sous-total, total Indy, écart, détail des lignes
+function BlocRegroupementReel({ regroupement, nom, lignes, indyRow, ouvert, onToggle, onSaveIndy, onSaveLigne, onDeleteLigne, onAjouterLigne }) {
+  const sousTotal = totalParMois(lignes)
+  const indyValeurs = MOIS_CLES.map(m => Number(indyRow?.[m] || 0))
+  const ecart = sousTotal.map((v,i) => indyValeurs[i] - v)
+  return (
+    <>
+      <tr onClick={onToggle} style={{ cursor:'pointer', background:'#f7f7f8' }}>
+        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8' }}>
+          {ouvert ? '▾' : '▸'} {nom} <span style={{ color:'#aaa', fontWeight:400 }}>({lignes.length})</span>
+        </td>
+        {sousTotal.map((v,i) => <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', fontWeight:600 }}>{v ? fmtEuros(v) : '—'}</td>)}
+        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:700, textAlign:'right' }}>{fmtEuros(sousTotal.reduce((s,v)=>s+v,0))}</td>
+        <td />
+      </tr>
+      {ouvert && (
+        <>
+          <LigneIndyTotal valeurs={indyRow || {}} onSave={onSaveIndy} />
+          <LigneEcart valeurs={ecart} />
+          {lignes.map(l => (
+            <LigneMensuelle key={l.id} ligne={l} onSave={onSaveLigne} onDelete={()=>onDeleteLigne(l)} />
+          ))}
+          <tr>
+            <td colSpan={15} style={{ padding:'4px 8px' }}>
+              <button style={BTN.small} onClick={()=>onAjouterLigne(regroupement)}>+ Ligne dans "{nom}"</button>
+            </td>
+          </tr>
+        </>
+      )}
+    </>
+  )
+}
+
+// Ligne d'atterrissage pour un regroupement : verrouillée (réel) sur les mois clos,
+// éditable (défaut = prévisionnel) sur les mois ouverts.
+function LigneAtterrissage({ nom, valeursReel, valeursPrev, moisClos, override, onSave }) {
+  const [local, setLocal] = useState(() => Object.fromEntries(MOIS_CLES.map((m,i) => [m, (override && override[m] != null) ? override[m] : valeursPrev[i]])))
+  useEffect(() => {
+    setLocal(Object.fromEntries(MOIS_CLES.map((m,i) => [m, (override && override[m] != null) ? override[m] : valeursPrev[i]])))
+  }, [override, valeursPrev.join(',')])
+
+  function setMois(m, v) { setLocal(l => ({ ...l, [m]: v })) }
+  function blurMois(m) {
+    const val = parseFloat(local[m])
+    onSave({ [m]: isNaN(val) ? null : val })
+  }
+
+  const valeursAffichees = MOIS_CLES.map((m,i) => moisClos[m] ? valeursReel[i] : Number(local[m]) || 0)
+  const total = valeursAffichees.reduce((s,v)=>s+v,0)
+
+  return (
+    <tr>
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, position:'sticky', left:0, background:'#fff' }}>{nom}</td>
+      {MOIS_CLES.map((m,i) => moisClos[m] ? (
+        <td key={m} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', color:'#888' }}>{valeursReel[i] ? fmtEuros(valeursReel[i]) : '—'}</td>
+      ) : (
+        <td key={m} style={{ padding:'2px 3px' }}>
+          <input type="number" step="0.01" value={local[m] ?? 0}
+            onChange={e=>setMois(m, e.target.value)} onBlur={()=>blurMois(m)}
+            style={{ width:64, padding:'5px 6px', borderRadius:6, border:'0.5px solid rgba(0,0,0,0.15)', fontSize:12, textAlign:'right', background:'#fffbe6' }} />
+        </td>
+      ))}
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, textAlign:'right', whiteSpace:'nowrap' }}>{fmtEuros(total)}</td>
+      <td />
+    </tr>
+  )
+}
+
+// Barre de clôture mensuelle (par saison)
+function BarreCloture({ moisClos, ecartsParMois, onToggle }) {
+  return (
+    <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:16 }}>
+      {MOIS_CLES.map((m,i) => {
+        const clos = !!moisClos[m]
+        const ecarts = ecartsParMois[i] || []
+        return (
+          <button key={m} onClick={()=>onToggle(m, !clos, ecarts)}
+            title={clos ? 'Cliquer pour réouvrir' : (ecarts.length ? `Écart sur : ${ecarts.join(', ')}` : 'Cliquer pour clôturer')}
+            style={{ padding:'6px 10px', borderRadius:20, border: clos ? 'none' : `1px solid ${ecarts.length ? '#D85A30' : 'rgba(0,0,0,0.15)'}`,
+              background: clos ? '#1a1a1a' : '#fff', color: clos ? '#fff' : (ecarts.length ? '#D85A30' : '#666'), fontSize:12, cursor:'pointer' }}>
+            {MOIS_COURTS[i]} {clos ? '🔒' : ecarts.length ? '⚠' : ''}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// Panneau de paramétrage des regroupements Indy
+function PanneauParametres({ regroupementsIndy, regroupementCoursId, onClose, showToast }) {
+  const { sauvegarderRegroupement, supprimerRegroupement, definirParametre } = useData()
+  const [nouveau, setNouveau] = useState({ nom:'', type:'charge' })
+
+  async function ajouter() {
+    if (!nouveau.nom.trim()) return
+    const res = await sauvegarderRegroupement({ nom: nouveau.nom.trim(), type: nouveau.type })
+    if (res?.error) showToast('Erreur : ' + res.error)
+    setNouveau({ nom:'', type:'charge' })
+  }
+
+  async function renommer(r) {
+    const nom = window.prompt('Nouveau nom du regroupement', r.nom)
+    if (!nom || !nom.trim() || nom.trim() === r.nom) return
+    await sauvegarderRegroupement({ ...r, nom: nom.trim() })
+  }
+
+  async function supprimer(r) {
+    if (!window.confirm(`Supprimer le regroupement "${r.nom}" ? Les lignes qui l'utilisent repasseront en "Non classé".`)) return
+    await supprimerRegroupement(r.id)
+  }
+
+  async function definirRegroupementCours(id) {
+    await definirParametre('regroupement_indy_cours', id)
+  }
+
+  const regroupementsRecette = regroupementsIndy.filter(r => r.type === 'recette')
+  const regroupementsCharge = regroupementsIndy.filter(r => r.type === 'charge')
+
+  return (
+    <Modal titre="Paramètres — Regroupements Indy" onClose={onClose}>
+      <p style={{ fontSize:12, color:'#888', marginBottom:14 }}>
+        Ces regroupements servent à répartir tes montants réels par catégorie comptable Indy. Tu peux les créer, renommer ou supprimer librement.
+      </p>
+
+      <div style={{ display:'flex', gap:8, marginBottom:14 }}>
+        <input style={{ ...INPUT, flex:1 }} value={nouveau.nom} onChange={e=>setNouveau(n=>({...n, nom:e.target.value}))} placeholder="Nom du regroupement" />
+        <select style={{ ...INPUT, width:120 }} value={nouveau.type} onChange={e=>setNouveau(n=>({...n, type:e.target.value}))}>
+          <option value="charge">Charge</option>
+          <option value="recette">Recette</option>
+        </select>
+        <button style={BTN.primary} onClick={ajouter} disabled={!nouveau.nom.trim()}>+ Ajouter</button>
+      </div>
+
+      <p style={{ ...LABEL, marginTop:16 }}>Recettes</p>
+      {regroupementsRecette.length === 0 && <p style={{ fontSize:12, color:'#aaa' }}>Aucun regroupement de recette.</p>}
+      {regroupementsRecette.map(r => (
+        <div key={r.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 0', borderTop:'0.5px solid #f5f5f5' }}>
+          <span style={{ flex:1, fontSize:13 }}>{r.nom}</span>
+          {regroupementCoursId === r.id && <span style={{ fontSize:10, color:'#FF0099', fontWeight:500 }}>= Cours</span>}
+          <button style={{ ...BTN.small, fontSize:11 }} onClick={()=>renommer(r)}>Renommer</button>
+          {regroupementCoursId !== r.id && (
+            <button style={{ ...BTN.small, fontSize:11 }} onClick={()=>definirRegroupementCours(r.id)}>Utiliser pour "Cours"</button>
+          )}
+          <button onClick={()=>supprimer(r)} style={{ background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:13 }}>🗑</button>
+        </div>
+      ))}
+
+      <p style={{ ...LABEL, marginTop:16 }}>Charges</p>
+      {regroupementsCharge.length === 0 && <p style={{ fontSize:12, color:'#aaa' }}>Aucun regroupement de charge.</p>}
+      {regroupementsCharge.map(r => (
+        <div key={r.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 0', borderTop:'0.5px solid #f5f5f5' }}>
+          <span style={{ flex:1, fontSize:13 }}>{r.nom}</span>
+          <button style={{ ...BTN.small, fontSize:11 }} onClick={()=>renommer(r)}>Renommer</button>
+          <button onClick={()=>supprimer(r)} style={{ background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:13 }}>🗑</button>
+        </div>
+      ))}
+    </Modal>
   )
 }
 
@@ -762,16 +968,26 @@ function EnteteTableau({ label }) {
 function OngletMensuel({ saison, showToast }) {
   const {
     cours, budgetCoursPrevisionnel, budgetPrevisionnel, budgetReel, budgetRepartition,
+    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetMoisClos, parametres,
     sauvegarderLigneBudgetMensuel, supprimerLigneBudgetMensuel, sauvegarderRepartition,
+    sauvegarderIndyTotal, sauvegarderAtterrissage, toggleMoisClos,
   } = useData()
   const [vue, setVue] = useState('previsionnel')
   const [ouvertes, setOuvertes] = useState({ Gym: false, Danse: false })
-  const [modalLigne, setModalLigne] = useState(null) // 'recette' | 'charge' | null
+  const [modalLigne, setModalLigne] = useState(null) // { type, regroupementId } | null
+  const [showParametres, setShowParametres] = useState(false)
 
   const table = vue === 'reel' ? 'budget_reel' : 'budget_previsionnel'
-  const lignesBrutes = (vue === 'reel' ? budgetReel : budgetPrevisionnel).filter(l => l.saison === saison)
+  const lignesPrevSaison = budgetPrevisionnel.filter(l => l.saison === saison)
+  const lignesReelSaison = budgetReel.filter(l => l.saison === saison)
+  const lignesBrutes = (vue === 'reel' ? lignesReelSaison : lignesPrevSaison)
   const lignesRecetteLibres = lignesBrutes.filter(l => l.type === 'recette')
   const lignesCharges = lignesBrutes.filter(l => l.type === 'charge')
+
+  const regroupementCoursId = parametres.regroupement_indy_cours || null
+  const regroupementsRecette = regroupementsIndy.filter(r => r.type === 'recette')
+  const regroupementsCharge = regroupementsIndy.filter(r => r.type === 'charge')
+  function nomRegroupement(id) { return id ? (regroupementsIndy.find(r => r.id === id)?.nom || 'Non classé') : 'Non classé' }
 
   const repartition = useMemo(() => budgetRepartition.find(r => r.saison === saison) || { saison, ...zerosMois() }, [budgetRepartition, saison])
   const [repLocal, setRepLocal] = useState(repartition)
@@ -794,6 +1010,7 @@ function OngletMensuel({ saison, showToast }) {
     }
     return groupes
   }, [cours, budgetCoursPrevisionnel, saison, repLocal])
+  const totalCoursMois = MOIS_CLES.map((_,i) => [...parCategorie.Gym, ...parCategorie.Danse].reduce((s,l) => s + l.valeurs[i], 0))
 
   async function handleSaveRepartition() {
     const res = await sauvegarderRepartition(saison, Object.fromEntries(MOIS_CLES.map(m => [m, Number(repLocal[m])||0])))
@@ -801,7 +1018,7 @@ function OngletMensuel({ saison, showToast }) {
     else showToast('Répartition enregistrée')
   }
 
-  async function handleCreerLigne(type, form) {
+  async function handleCreerLigne(type, regroupementId, form) {
     const res = await sauvegarderLigneBudgetMensuel(table, { type, saison, ...form, ...zerosMois() })
     if (res?.error) showToast('Erreur : ' + res.error)
     setModalLigne(null)
@@ -827,21 +1044,89 @@ function OngletMensuel({ saison, showToast }) {
   let cumul = 0
   const soldeCumule = soldeMois.map(s => (cumul += s))
 
-  // Écart réel vs prévisionnel (indépendant du toggle d'affichage)
-  const lignesRecettePrev = budgetPrevisionnel.filter(l => l.saison === saison && l.type === 'recette')
-  const lignesChargePrev = budgetPrevisionnel.filter(l => l.saison === saison && l.type === 'charge')
-  const lignesRecetteReel = budgetReel.filter(l => l.saison === saison && l.type === 'recette')
-  const lignesChargeReel = budgetReel.filter(l => l.saison === saison && l.type === 'charge')
+  // Référence prévisionnelle d'un regroupement (somme des lignes prévisionnelles qui le
+  // portent, + total cours si c'est le regroupement "Cours")
+  function referencePrevisionnelle(regroupementId, type) {
+    const lignes = lignesPrevSaison.filter(l => l.type === type && (l.regroupement_id || null) === regroupementId)
+    let valeurs = totalParMois(lignes)
+    if (type === 'recette' && regroupementId && regroupementId === regroupementCoursId) {
+      valeurs = valeurs.map((v,i) => v + totalCoursMois[i])
+    }
+    return valeurs
+  }
+
+  function lignesReelDuRegroupement(regroupementId, type) {
+    return lignesReelSaison.filter(l => l.type === type && (l.regroupement_id || null) === regroupementId)
+  }
+
+  // Écart réel / prévisionnel global (indépendant du toggle d'affichage)
+  const lignesRecettePrev = lignesPrevSaison.filter(l => l.type === 'recette')
+  const lignesChargePrev = lignesPrevSaison.filter(l => l.type === 'charge')
+  const lignesRecetteReel = lignesReelSaison.filter(l => l.type === 'recette')
+  const lignesChargeReel = lignesReelSaison.filter(l => l.type === 'charge')
   const totalRecettePrev = totalParMois([...lignesCoursValeurs, ...lignesRecettePrev]).reduce((s,v)=>s+v, 0)
   const totalRecetteReel = lignesRecetteReel.reduce((s,l) => s + totalLigne(l), 0)
   const totalChargePrev = lignesChargePrev.reduce((s,l) => s + totalLigne(l), 0)
   const totalChargeReel = lignesChargeReel.reduce((s,l) => s + totalLigne(l), 0)
 
+  // Clôture mensuelle
+  const moisClos = useMemo(() => budgetMoisClos.find(m => m.saison === saison) || { saison, ...Object.fromEntries(MOIS_CLES.map(m => [m, false])) }, [budgetMoisClos, saison])
+
+  const ecartsParMois = useMemo(() => {
+    return MOIS_CLES.map(m => {
+      const problemes = []
+      for (const r of regroupementsIndy) {
+        const indyRow = budgetIndyTotaux.find(t => t.regroupement_id === r.id && t.saison === saison)
+        if (!indyRow) continue // pas encore de total Indy saisi pour ce regroupement : on ne bloque pas
+        const sousTotal = lignesReelDuRegroupement(r.id, r.type).reduce((s,l) => s + Number(l[m]||0), 0)
+        if (Math.abs(Number(indyRow[m]||0) - sousTotal) >= 0.01) problemes.push(r.nom)
+      }
+      return problemes
+    })
+  }, [regroupementsIndy, budgetIndyTotaux, lignesReelSaison, saison])
+
+  async function handleToggleMois(mois, versClos, ecarts) {
+    if (versClos && ecarts.length > 0) {
+      window.alert(`Impossible de clôturer ${mois} : écart non nul sur ${ecarts.join(', ')}.`)
+      return
+    }
+    if (!versClos && !window.confirm(`Réouvrir le mois de ${mois} ?`)) return
+    await toggleMoisClos(saison, mois, versClos)
+  }
+
+  async function handleSaveIndyTotal(regroupementId, champ) {
+    const res = await sauvegarderIndyTotal(regroupementId, saison, champ)
+    if (res?.error) showToast('Erreur : ' + res.error)
+  }
+
+  async function handleSaveAtterrissage(regroupementId, champ) {
+    const res = await sauvegarderAtterrissage(regroupementId, saison, champ)
+    if (res?.error) showToast('Erreur : ' + res.error)
+  }
+
+  // Atterrissage : solde global (somme des regroupements, mêlant réel verrouillé et prévisionnel ajusté)
+  function valeursAtterrissage(regroupementId, type) {
+    const valeursPrev = referencePrevisionnelle(regroupementId, type)
+    const valeursReel = totalParMois(lignesReelDuRegroupement(regroupementId, type))
+    const override = budgetAtterrissage.find(a => a.regroupement_id === regroupementId && a.saison === saison)
+    return MOIS_CLES.map((m,i) => moisClos[m] ? valeursReel[i] : ((override && override[m] != null) ? Number(override[m]) : valeursPrev[i]))
+  }
+  const totalAtterrissageRecette = regroupementsRecette.map(r => valeursAtterrissage(r.id, 'recette'))
+  const totalAtterrissageCharge = regroupementsCharge.map(r => valeursAtterrissage(r.id, 'charge'))
+  const sommeAtterrissageRecette = MOIS_CLES.map((_,i) => totalAtterrissageRecette.reduce((s,v) => s + v[i], 0))
+  const sommeAtterrissageCharge = MOIS_CLES.map((_,i) => totalAtterrissageCharge.reduce((s,v) => s + v[i], 0))
+  const soldeAtterrissageMois = sommeAtterrissageRecette.map((r,i) => r - sommeAtterrissageCharge[i])
+  let cumulAtt = 0
+  const soldeAtterrissageCumule = soldeAtterrissageMois.map(s => (cumulAtt += s))
+
   return (
     <div>
-      <p style={{ fontSize:13, color:'#888', marginBottom:16 }}>
-        Budget mensuel (août → juillet) pour la saison <strong>{saison}</strong>. Les recettes Gym/Danse sont calculées automatiquement à partir de "Recettes par cours", réparties sur les mois selon la clé ci-dessous. Le reste (Stages, autres recettes, charges) se saisit librement.
-      </p>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10, marginBottom:16, flexWrap:'wrap' }}>
+        <p style={{ fontSize:13, color:'#888', margin:0, flex:1, minWidth:260 }}>
+          Budget mensuel (août → juillet) pour la saison <strong>{saison}</strong>. Les recettes Gym/Danse sont calculées automatiquement à partir de "Recettes par cours", réparties sur les mois selon la clé ci-dessous.
+        </p>
+        <button style={BTN.ghost} onClick={()=>setShowParametres(true)}>⚙ Regroupements Indy</button>
+      </div>
 
       <div className="card" style={{ padding:16, marginBottom:20 }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10, flexWrap:'wrap', gap:8 }}>
@@ -867,58 +1152,156 @@ function OngletMensuel({ saison, showToast }) {
       <div style={{ display:'flex', gap:8, marginBottom:14 }}>
         <button onClick={()=>setVue('previsionnel')} style={{ ...BTN.ghost, ...(vue==='previsionnel' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Prévisionnel</button>
         <button onClick={()=>setVue('reel')} style={{ ...BTN.ghost, ...(vue==='reel' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Réel</button>
+        <button onClick={()=>setVue('atterrissage')} style={{ ...BTN.ghost, ...(vue==='atterrissage' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Atterrissage</button>
       </div>
 
-      <div style={{ overflowX:'auto', marginBottom:16 }}>
-        <table style={{ borderCollapse:'collapse', width:'100%' }}>
-          <EnteteTableau label="Recettes" />
-          <tbody>
-            {vue === 'previsionnel' && ['Gym','Danse'].map(cat => {
-              const lignes = parCategorie[cat]
-              const valeursCat = MOIS_CLES.map((_,i) => lignes.reduce((s,l) => s + l.valeurs[i], 0))
-              if (lignes.length === 0) return null
-              return (
-                <Fragment key={cat}>
-                  <tr onClick={()=>setOuvertes(o=>({...o,[cat]:!o[cat]}))} style={{ cursor:'pointer', background:'#f7f7f8' }}>
-                    <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8' }}>
-                      {ouvertes[cat] ? '▾' : '▸'} {cat} <span style={{ color:'#aaa', fontWeight:400 }}>({lignes.length})</span>
-                    </td>
-                    {valeursCat.map((v,i) => <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', fontWeight:600 }}>{v ? fmtEuros(v) : '—'}</td>)}
-                    <td style={{ padding:'6px 8px', fontSize:12, fontWeight:700, textAlign:'right' }}>{fmtEuros(valeursCat.reduce((s,v)=>s+v,0))}</td>
-                    <td />
-                  </tr>
-                  {ouvertes[cat] && lignes.map(l => (
-                    <LigneCalculee key={l.nom} libelle={l.nom} valeurs={l.valeurs} sousLigne />
-                  ))}
-                </Fragment>
-              )
-            })}
-            {lignesRecetteLibres.map(l => (
-              <LigneMensuelle key={l.id} ligne={l} onSave={handleSaveLigne} onDelete={()=>handleDeleteLigne(l)} />
-            ))}
-          </tbody>
-        </table>
-        <button style={{ ...BTN.small, marginTop:8 }} onClick={()=>setModalLigne('recette')}>+ Ligne de recette</button>
-      </div>
+      {vue === 'atterrissage' && (
+        <>
+          <p style={{ fontSize:12, color:'#888', marginBottom:8 }}>
+            Clôture des mois : un mois clôturé verrouille l'atterrissage sur le réel. Impossible de clôturer s'il reste un écart sur un regroupement.
+          </p>
+          <BarreCloture moisClos={moisClos} ecartsParMois={ecartsParMois} onToggle={handleToggleMois} />
+        </>
+      )}
 
-      <div style={{ overflowX:'auto', marginBottom:16 }}>
-        <table style={{ borderCollapse:'collapse', width:'100%' }}>
-          <EnteteTableau label="Charges" />
-          <tbody>
-            {lignesCharges.map(l => (
-              <LigneMensuelle key={l.id} ligne={l} onSave={handleSaveLigne} onDelete={()=>handleDeleteLigne(l)} />
-            ))}
-          </tbody>
-        </table>
-        <button style={{ ...BTN.small, marginTop:8 }} onClick={()=>setModalLigne('charge')}>+ Ligne de charge</button>
-      </div>
+      {vue !== 'atterrissage' && (
+        <div style={{ overflowX:'auto', marginBottom:16 }}>
+          <table style={{ borderCollapse:'collapse', width:'100%' }}>
+            <EnteteTableau label="Recettes" />
+            <tbody>
+              {vue === 'previsionnel' && ['Gym','Danse'].map(cat => {
+                const lignes = parCategorie[cat]
+                const valeursCat = MOIS_CLES.map((_,i) => lignes.reduce((s,l) => s + l.valeurs[i], 0))
+                if (lignes.length === 0) return null
+                return (
+                  <Fragment key={cat}>
+                    <tr onClick={()=>setOuvertes(o=>({...o,[cat]:!o[cat]}))} style={{ cursor:'pointer', background:'#f7f7f8' }}>
+                      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8' }}>
+                        {ouvertes[cat] ? '▾' : '▸'} {cat} <span style={{ color:'#aaa', fontWeight:400 }}>({lignes.length})</span>
+                      </td>
+                      {valeursCat.map((v,i) => <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', fontWeight:600 }}>{v ? fmtEuros(v) : '—'}</td>)}
+                      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:700, textAlign:'right' }}>{fmtEuros(valeursCat.reduce((s,v)=>s+v,0))}</td>
+                      <td />
+                    </tr>
+                    {ouvertes[cat] && lignes.map(l => (
+                      <LigneCalculee key={l.nom} libelle={l.nom} valeurs={l.valeurs} sousLigne />
+                    ))}
+                  </Fragment>
+                )
+              })}
+              {vue === 'previsionnel' && lignesRecetteLibres.map(l => (
+                <LigneMensuelle key={l.id} ligne={l} nomRegroupement={nomRegroupement(l.regroupement_id)} onSave={handleSaveLigne} onDelete={()=>handleDeleteLigne(l)} />
+              ))}
+              {vue === 'reel' && regroupementsRecette.map(r => (
+                <BlocRegroupementReel key={r.id} regroupement={r} nom={r.nom}
+                  lignes={lignesReelDuRegroupement(r.id, 'recette')}
+                  indyRow={budgetIndyTotaux.find(t => t.regroupement_id === r.id && t.saison === saison)}
+                  ouvert={!!ouvertes['r_'+r.id]} onToggle={()=>setOuvertes(o=>({...o, ['r_'+r.id]: !o['r_'+r.id]}))}
+                  onSaveIndy={(champ)=>handleSaveIndyTotal(r.id, champ)}
+                  onSaveLigne={handleSaveLigne} onDeleteLigne={handleDeleteLigne}
+                  onAjouterLigne={(reg)=>setModalLigne({ type:'recette', regroupementId: reg.id })} />
+              ))}
+              {vue === 'reel' && lignesRecetteLibres.filter(l => !l.regroupement_id).length > 0 && (
+                <BlocRegroupementReel regroupement={null} nom="Non classé"
+                  lignes={lignesRecetteLibres.filter(l => !l.regroupement_id)}
+                  indyRow={null}
+                  ouvert={!!ouvertes['r_nonclasse']} onToggle={()=>setOuvertes(o=>({...o, r_nonclasse: !o.r_nonclasse}))}
+                  onSaveIndy={()=>{}}
+                  onSaveLigne={handleSaveLigne} onDeleteLigne={handleDeleteLigne}
+                  onAjouterLigne={()=>setModalLigne({ type:'recette', regroupementId: null })} />
+              )}
+            </tbody>
+          </table>
+          {vue === 'reel' && (
+            <p style={{ fontSize:11, color:'#aaa', marginTop:8 }}>Pour ajouter une ligne "Cours" (CB, chèques...), utilise le regroupement marqué "= Cours" dans les paramètres.</p>
+          )}
+          <button style={{ ...BTN.small, marginTop:8 }} onClick={()=>setModalLigne({ type:'recette', regroupementId:null })}>+ Ligne de recette</button>
+        </div>
+      )}
+
+      {vue !== 'atterrissage' && (
+        <div style={{ overflowX:'auto', marginBottom:16 }}>
+          <table style={{ borderCollapse:'collapse', width:'100%' }}>
+            <EnteteTableau label="Charges" />
+            <tbody>
+              {vue === 'previsionnel' && lignesCharges.map(l => (
+                <LigneMensuelle key={l.id} ligne={l} nomRegroupement={nomRegroupement(l.regroupement_id)} onSave={handleSaveLigne} onDelete={()=>handleDeleteLigne(l)} />
+              ))}
+              {vue === 'reel' && regroupementsCharge.map(r => (
+                <BlocRegroupementReel key={r.id} regroupement={r} nom={r.nom}
+                  lignes={lignesReelDuRegroupement(r.id, 'charge')}
+                  indyRow={budgetIndyTotaux.find(t => t.regroupement_id === r.id && t.saison === saison)}
+                  ouvert={!!ouvertes['c_'+r.id]} onToggle={()=>setOuvertes(o=>({...o, ['c_'+r.id]: !o['c_'+r.id]}))}
+                  onSaveIndy={(champ)=>handleSaveIndyTotal(r.id, champ)}
+                  onSaveLigne={handleSaveLigne} onDeleteLigne={handleDeleteLigne}
+                  onAjouterLigne={(reg)=>setModalLigne({ type:'charge', regroupementId: reg.id })} />
+              ))}
+              {vue === 'reel' && lignesCharges.filter(l => !l.regroupement_id).length > 0 && (
+                <BlocRegroupementReel regroupement={null} nom="Non classé"
+                  lignes={lignesCharges.filter(l => !l.regroupement_id)}
+                  indyRow={null}
+                  ouvert={!!ouvertes['c_nonclasse']} onToggle={()=>setOuvertes(o=>({...o, c_nonclasse: !o.c_nonclasse}))}
+                  onSaveIndy={()=>{}}
+                  onSaveLigne={handleSaveLigne} onDeleteLigne={handleDeleteLigne}
+                  onAjouterLigne={()=>setModalLigne({ type:'charge', regroupementId: null })} />
+              )}
+            </tbody>
+          </table>
+          <button style={{ ...BTN.small, marginTop:8 }} onClick={()=>setModalLigne({ type:'charge', regroupementId:null })}>+ Ligne de charge</button>
+        </div>
+      )}
+
+      {vue === 'atterrissage' && (
+        <div style={{ overflowX:'auto', marginBottom:16 }}>
+          <table style={{ borderCollapse:'collapse', width:'100%' }}>
+            <EnteteTableau label="Recettes (atterrissage)" />
+            <tbody>
+              {regroupementsRecette.map(r => (
+                <LigneAtterrissage key={r.id} nom={r.nom}
+                  valeursReel={totalParMois(lignesReelDuRegroupement(r.id, 'recette'))}
+                  valeursPrev={referencePrevisionnelle(r.id, 'recette')}
+                  moisClos={moisClos}
+                  override={budgetAtterrissage.find(a => a.regroupement_id === r.id && a.saison === saison)}
+                  onSave={(champ)=>handleSaveAtterrissage(r.id, champ)} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {vue === 'atterrissage' && (
+        <div style={{ overflowX:'auto', marginBottom:16 }}>
+          <table style={{ borderCollapse:'collapse', width:'100%' }}>
+            <EnteteTableau label="Charges (atterrissage)" />
+            <tbody>
+              {regroupementsCharge.map(r => (
+                <LigneAtterrissage key={r.id} nom={r.nom}
+                  valeursReel={totalParMois(lignesReelDuRegroupement(r.id, 'charge'))}
+                  valeursPrev={referencePrevisionnelle(r.id, 'charge')}
+                  moisClos={moisClos}
+                  override={budgetAtterrissage.find(a => a.regroupement_id === r.id && a.saison === saison)}
+                  onSave={(champ)=>handleSaveAtterrissage(r.id, champ)} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div style={{ overflowX:'auto', marginBottom:24 }}>
         <table style={{ borderCollapse:'collapse', width:'100%' }}>
           <EnteteTableau label="Solde" />
           <tbody>
-            <LigneCalculee libelle="Solde du mois" valeurs={soldeMois} fort />
-            <LigneCalculee libelle="Solde cumulé" valeurs={soldeCumule} fort />
+            {vue !== 'atterrissage' ? (
+              <>
+                <LigneCalculee libelle="Solde du mois" valeurs={soldeMois} fort />
+                <LigneCalculee libelle="Solde cumulé" valeurs={soldeCumule} fort totalAffiche={soldeCumule[soldeCumule.length-1]} />
+              </>
+            ) : (
+              <>
+                <LigneCalculee libelle="Atterrissage du mois" valeurs={soldeAtterrissageMois} fort />
+                <LigneCalculee libelle="Atterrissage cumulé" valeurs={soldeAtterrissageCumule} fort totalAffiche={soldeAtterrissageCumule[soldeAtterrissageCumule.length-1]} />
+              </>
+            )}
           </tbody>
         </table>
       </div>
@@ -940,7 +1323,16 @@ function OngletMensuel({ saison, showToast }) {
       </div>
 
       {modalLigne && (
-        <FormLigneBudget type={modalLigne} onClose={()=>setModalLigne(null)} onCree={(form)=>handleCreerLigne(modalLigne, form)} />
+        <FormLigneBudget type={modalLigne.type}
+          regroupements={modalLigne.type === 'recette' ? regroupementsRecette : regroupementsCharge}
+          regroupementParDefaut={modalLigne.regroupementId}
+          onClose={()=>setModalLigne(null)}
+          onCree={(form)=>handleCreerLigne(modalLigne.type, modalLigne.regroupementId, form)} />
+      )}
+
+      {showParametres && (
+        <PanneauParametres regroupementsIndy={regroupementsIndy} regroupementCoursId={regroupementCoursId}
+          onClose={()=>setShowParametres(false)} showToast={showToast} />
       )}
     </div>
   )
