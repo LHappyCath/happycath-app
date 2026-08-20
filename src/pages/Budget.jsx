@@ -1057,7 +1057,9 @@ function OngletMensuel({ saison, showToast }) {
 
   async function handleDeleteLigne(ligne) {
     if (!window.confirm(`Supprimer la ligne "${ligne.libelle}" ?`)) return
-    await supprimerLigneBudgetMensuel(table, ligne.id)
+    const autreNom = table === 'budget_reel' ? 'Prévisionnel' : 'Réel'
+    const supprimerMiroir = ligne.lien ? window.confirm(`Supprimer aussi sa ligne miroir dans ${autreNom} ?`) : false
+    await supprimerLigneBudgetMensuel(table, ligne.id, supprimerMiroir)
   }
 
   // Totaux
