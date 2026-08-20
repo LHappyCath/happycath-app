@@ -931,7 +931,7 @@ function GraphiqueBarresComparaison({ prev, reel, libellePeriode }) {
 function GraphiqueEvolution({ soldePrevCumule, soldeReelCumule, soldeAtterrissageCumule, dernierMoisAvecReel }) {
   const [survol, setSurvol] = useState(null)
   const largeur = 680, hauteur = 260
-  const margeHautB = 16, margeBas = 34, margeGauche = 40, margeDroite = 150
+  const margeHautB = 16, margeBas = 34, margeGauche = 62, margeDroite = 150
   const zoneW = largeur - margeGauche - margeDroite
   const zoneH = hauteur - margeHautB - margeBas
 
@@ -989,7 +989,7 @@ function GraphiqueEvolution({ soldePrevCumule, soldeReelCumule, soldeAtterrissag
           return (
             <g key={t}>
               <line x1={margeGauche} x2={largeur-margeDroite} y1={yLigne} y2={yLigne} stroke="#e1e0d9" strokeWidth="1" />
-              <text x={margeGauche - 6} y={yLigne + 3} textAnchor="end" fontSize="9" fill="#aaa9a2">{fmtEurosSigne(Math.round(valeur))}</text>
+              <text x={margeGauche - 6} y={yLigne + 3} textAnchor="end" fontSize="8" fill="#aaa9a2">{fmtEurosSigne(Math.round(valeur))}</text>
             </g>
           )
         })}
@@ -1163,7 +1163,7 @@ function LigneIndyTotal({ valeurs, onSave }) {
 }
 
 // Ligne calculée (lecture seule) pour une catégorie de cours ou un cours en détail
-function LigneCalculee({ libelle, valeurs, sousLigne, fort, totalAffiche }) {
+function LigneCalculee({ libelle, valeurs, sousLigne, fort, totalAffiche, colorerNegatif }) {
   const total = totalAffiche !== undefined ? totalAffiche : valeurs.reduce((s,v)=>s+v,0)
   return (
     <tr>
@@ -1171,9 +1171,9 @@ function LigneCalculee({ libelle, valeurs, sousLigne, fort, totalAffiche }) {
         {libelle}
       </td>
       {valeurs.map((v,i) => (
-        <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', color:sousLigne?'#aaa':'#666' }}>{v ? fmtEuros(v) : '—'}</td>
+        <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', color: colorerNegatif && v < 0 ? '#D85A30' : (sousLigne?'#aaa':'#666') }}>{v ? fmtEuros(v) : '—'}</td>
       ))}
-      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:fort?700:600, textAlign:'right', whiteSpace:'nowrap' }}>{fmtEuros(total)}</td>
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:fort?700:600, textAlign:'right', whiteSpace:'nowrap', color: colorerNegatif && total < 0 ? '#D85A30' : undefined }}>{fmtEuros(total)}</td>
       <td />
     </tr>
   )
@@ -2180,8 +2180,10 @@ function OngletMensuel({ saison, showToast }) {
             )}
             {(vue === 'previsionnel' || vue === 'reel') && (
               <>
+                <LigneCalculee libelle="Recettes du mois" valeurs={totalRecettesMois} />
+                <LigneCalculee libelle="Charges du mois" valeurs={totalChargesMois} />
                 <LigneCalculee libelle="Solde du mois" valeurs={soldeMois} fort />
-                <LigneCalculee libelle="Solde cumulé" valeurs={soldeCumule} fort totalAffiche={soldeCumule[soldeCumule.length-1]} />
+                <LigneCalculee libelle="Solde cumulé" valeurs={soldeCumule} fort totalAffiche={soldeCumule[soldeCumule.length-1]} colorerNegatif />
               </>
             )}
           </tbody>
