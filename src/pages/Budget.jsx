@@ -660,6 +660,10 @@ function OngletCalendrier({ saison, showToast }) {
 // ─── ONGLET MENSUEL (prévisionnel + réel, par mois) ─────────────────
 const MOIS_CLES = ['aout','septembre','octobre','novembre','decembre','janvier','fevrier','mars','avril','mai','juin','juillet']
 const MOIS_COURTS = ['Août','Sept','Oct','Nov','Déc','Janv','Fév','Mars','Avr','Mai','Juin','Juil']
+// Largeur fixe de la 1ère colonne (libellé), identique sur tous les tableaux Recettes/Charges
+// pour que les colonnes de mois restent alignées d'un tableau à l'autre.
+const LARGEUR_LIBELLE = 210
+const COL_LIBELLE = { width: LARGEUR_LIBELLE, minWidth: LARGEUR_LIBELLE, maxWidth: LARGEUR_LIBELLE, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }
 
 function zerosMois() { return Object.fromEntries(MOIS_CLES.map(m => [m, 0])) }
 function totalLigne(l) { return MOIS_CLES.reduce((s,m) => s + Number(l[m]||0), 0) }
@@ -717,7 +721,7 @@ function LigneMensuelle({ ligne, nomRegroupement, onSave, onDelete, onEdit }) {
   }
   return (
     <tr>
-      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, whiteSpace:'nowrap', position:'sticky', left:0, background:'#fff' }}>
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, whiteSpace:'nowrap', position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>
         {ligne.libelle}
         {nomRegroupement && <span style={{ color:'#aaa', fontWeight:400 }}> · {nomRegroupement}</span>}
       </td>
@@ -748,7 +752,7 @@ function LigneIndyTotal({ valeurs, onSave }) {
   }
   return (
     <tr>
-      <td style={{ padding:'6px 8px', fontSize:11, fontStyle:'italic', color:'#888', position:'sticky', left:0, background:'#fff' }}>
+      <td style={{ padding:'6px 8px', fontSize:11, fontStyle:'italic', color:'#888', position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>
         Total Indy (saisie manuelle)
       </td>
       {MOIS_CLES.map(m => (
@@ -769,7 +773,7 @@ function LigneCalculee({ libelle, valeurs, sousLigne, fort, totalAffiche }) {
   const total = totalAffiche !== undefined ? totalAffiche : valeurs.reduce((s,v)=>s+v,0)
   return (
     <tr>
-      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:fort?600:500, color:sousLigne?'#888':'#1a1a1a', paddingLeft:sousLigne?24:8, position:'sticky', left:0, background:'#fff' }}>
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:fort?600:500, color:sousLigne?'#888':'#1a1a1a', paddingLeft:sousLigne?24:8, position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>
         {libelle}
       </td>
       {valeurs.map((v,i) => (
@@ -785,7 +789,7 @@ function LigneCalculee({ libelle, valeurs, sousLigne, fort, totalAffiche }) {
 function LigneEcart({ valeurs }) {
   return (
     <tr>
-      <td style={{ padding:'6px 8px', fontSize:11, color:'#888', position:'sticky', left:0, background:'#fff' }}>Écart</td>
+      <td style={{ padding:'6px 8px', fontSize:11, color:'#888', position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>Écart</td>
       {valeurs.map((v,i) => (
         <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', fontWeight:600, color: Math.abs(v)<0.01 ? '#1D9E75' : '#D85A30' }}>
           {Math.abs(v)<0.01 ? '✓' : fmtEurosSigne(v)}
@@ -805,7 +809,7 @@ function LigneEcartPaire({ libelle, valeursPrev, valeursReel, type }) {
   return (
     <>
       <tr onClick={()=>setOuvert(o=>!o)} style={{ cursor:'pointer' }}>
-        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, whiteSpace:'nowrap', position:'sticky', left:0, background:'#fff' }}>
+        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, whiteSpace:'nowrap', position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>
           {ouvert ? '▾' : '▸'} {libelle}
         </td>
         {ecart.map((v,i) => (
@@ -821,13 +825,13 @@ function LigneEcartPaire({ libelle, valeursPrev, valeursReel, type }) {
       {ouvert && (
         <>
           <tr>
-            <td style={{ padding:'2px 8px 2px 24px', fontSize:11, color:'#aaa', position:'sticky', left:0, background:'#fff' }}>Réel</td>
+            <td style={{ padding:'2px 8px 2px 24px', fontSize:11, color:'#aaa', position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>Réel</td>
             {valeursReel.map((v,i) => <td key={i} style={{ padding:'2px 4px', fontSize:11, textAlign:'right', color:'#aaa' }}>{v ? fmtEuros(v) : '—'}</td>)}
             <td style={{ padding:'2px 8px', fontSize:11, textAlign:'right', color:'#aaa' }}>{fmtEuros(valeursReel.reduce((s,v)=>s+v,0))}</td>
             <td />
           </tr>
           <tr>
-            <td style={{ padding:'2px 8px 6px 24px', fontSize:11, color:'#aaa', position:'sticky', left:0, background:'#fff' }}>Prévisionnel</td>
+            <td style={{ padding:'2px 8px 6px 24px', fontSize:11, color:'#aaa', position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>Prévisionnel</td>
             {valeursPrev.map((v,i) => <td key={i} style={{ padding:'2px 4px 6px', fontSize:11, textAlign:'right', color:'#aaa' }}>{v ? fmtEuros(v) : '—'}</td>)}
             <td style={{ padding:'2px 8px 6px', fontSize:11, textAlign:'right', color:'#aaa' }}>{fmtEuros(valeursPrev.reduce((s,v)=>s+v,0))}</td>
             <td />
@@ -848,7 +852,7 @@ function BlocRegroupementEcart({ nom, type, paires, ouvert, onToggle }) {
   return (
     <>
       <tr onClick={onToggle} style={{ cursor:'pointer', background:'#f7f7f8' }}>
-        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8' }}>
+        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8', ...COL_LIBELLE }}>
           {ouvert ? '▾' : '▸'} {nom} <span style={{ color:'#aaa', fontWeight:400 }}>({paires.length})</span>
         </td>
         {ecart.map((v,i) => (
@@ -878,7 +882,7 @@ function BlocRegroupementReel({ regroupement, nom, lignes, indyRow, avecIndy, ou
   return (
     <>
       <tr onClick={onToggle} style={{ cursor:'pointer', background:'#f7f7f8' }}>
-        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8' }}>
+        <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8', ...COL_LIBELLE }}>
           {ouvert ? '▾' : '▸'} {nom} <span style={{ color:'#aaa', fontWeight:400 }}>({lignes.length})</span>
         </td>
         {sousTotal.map((v,i) => <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', fontWeight:600 }}>{v ? fmtEuros(v) : '—'}</td>)}
@@ -922,7 +926,7 @@ function LigneAtterrissage({ nom, valeursReel, valeursPrev, moisClos, override, 
 
   return (
     <tr>
-      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, position:'sticky', left:0, background:'#fff' }}>{nom}</td>
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>{nom}</td>
       {MOIS_CLES.map((m,i) => moisClos[m] ? (
         <td key={m} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', color:'#888' }}>{valeursReel[i] ? fmtEuros(valeursReel[i]) : '—'}</td>
       ) : (
@@ -1049,7 +1053,7 @@ function EnteteTableau({ label }) {
   return (
     <thead>
       <tr>
-        <th style={{ padding:'6px 8px', fontSize:11, fontWeight:500, color:'#888', textAlign:'left', position:'sticky', left:0, background:'#fff' }}>{label}</th>
+        <th style={{ padding:'6px 8px', fontSize:11, fontWeight:500, color:'#888', textAlign:'left', position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>{label}</th>
         {MOIS_COURTS.map(m => <th key={m} style={{ padding:'6px 4px', fontSize:11, fontWeight:500, color:'#888' }}>{m}</th>)}
         <th style={{ padding:'6px 8px', fontSize:11, fontWeight:500, color:'#888' }}>Total</th>
         <th />
@@ -1281,8 +1285,8 @@ function OngletMensuel({ saison, showToast }) {
       <div style={{ display:'flex', gap:8, marginBottom:14 }}>
         <button onClick={()=>setVue('previsionnel')} style={{ ...BTN.ghost, ...(vue==='previsionnel' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Prévisionnel</button>
         <button onClick={()=>setVue('reel')} style={{ ...BTN.ghost, ...(vue==='reel' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Réel</button>
-        <button onClick={()=>setVue('atterrissage')} style={{ ...BTN.ghost, ...(vue==='atterrissage' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Atterrissage</button>
         <button onClick={()=>setVue('ecart')} style={{ ...BTN.ghost, ...(vue==='ecart' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Écart</button>
+        <button onClick={()=>setVue('atterrissage')} style={{ ...BTN.ghost, ...(vue==='atterrissage' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Atterrissage</button>
       </div>
 
       {vue === 'ecart' && (
@@ -1302,7 +1306,7 @@ function OngletMensuel({ saison, showToast }) {
 
       {(vue === 'previsionnel' || vue === 'reel') && (
         <div style={{ overflowX:'auto', marginBottom:16 }}>
-          <table style={{ borderCollapse:'collapse', width:'100%' }}>
+          <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed' }}>
             <EnteteTableau label="Recettes" />
             <tbody>
               {vue === 'previsionnel' && ['Gym','Danse'].map(cat => {
@@ -1312,7 +1316,7 @@ function OngletMensuel({ saison, showToast }) {
                 return (
                   <Fragment key={cat}>
                     <tr onClick={()=>setOuvertes(o=>({...o,[cat]:!o[cat]}))} style={{ cursor:'pointer', background:'#f7f7f8' }}>
-                      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8' }}>
+                      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8', ...COL_LIBELLE }}>
                         {ouvertes[cat] ? '▾' : '▸'} {cat} <span style={{ color:'#aaa', fontWeight:400 }}>({lignes.length})</span>
                       </td>
                       {valeursCat.map((v,i) => <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', fontWeight:600 }}>{v ? fmtEuros(v) : '—'}</td>)}
@@ -1356,7 +1360,7 @@ function OngletMensuel({ saison, showToast }) {
 
       {(vue === 'previsionnel' || vue === 'reel') && (
         <div style={{ overflowX:'auto', marginBottom:16 }}>
-          <table style={{ borderCollapse:'collapse', width:'100%' }}>
+          <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed' }}>
             <EnteteTableau label="Charges" />
             <tbody>
               {(vue === 'previsionnel' || vue === 'reel') && regroupementsCharge.map(r => (
@@ -1388,7 +1392,7 @@ function OngletMensuel({ saison, showToast }) {
       {vue === 'ecart' && (
         <>
           <div style={{ overflowX:'auto', marginBottom:16 }}>
-            <table style={{ borderCollapse:'collapse', width:'100%' }}>
+            <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed' }}>
               <EnteteTableau label="Recettes — écart" />
               <tbody>
                 {[...regroupementsRecette, { id: null, nom: 'Non classé' }].map(r => {
@@ -1404,7 +1408,7 @@ function OngletMensuel({ saison, showToast }) {
           </div>
 
           <div style={{ overflowX:'auto', marginBottom:16 }}>
-            <table style={{ borderCollapse:'collapse', width:'100%' }}>
+            <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed' }}>
               <EnteteTableau label="Charges — écart" />
               <tbody>
                 {[...regroupementsCharge, { id: null, nom: 'Non classé' }].map(r => {
@@ -1423,7 +1427,7 @@ function OngletMensuel({ saison, showToast }) {
 
       {vue === 'atterrissage' && (
         <div style={{ overflowX:'auto', marginBottom:16 }}>
-          <table style={{ borderCollapse:'collapse', width:'100%' }}>
+          <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed' }}>
             <EnteteTableau label="Recettes (atterrissage)" />
             <tbody>
               {regroupementsRecette.map(r => (
@@ -1441,7 +1445,7 @@ function OngletMensuel({ saison, showToast }) {
 
       {vue === 'atterrissage' && (
         <div style={{ overflowX:'auto', marginBottom:16 }}>
-          <table style={{ borderCollapse:'collapse', width:'100%' }}>
+          <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed' }}>
             <EnteteTableau label="Charges (atterrissage)" />
             <tbody>
               {regroupementsCharge.map(r => (
@@ -1458,7 +1462,7 @@ function OngletMensuel({ saison, showToast }) {
       )}
 
       <div style={{ overflowX:'auto', marginBottom:24 }}>
-        <table style={{ borderCollapse:'collapse', width:'100%' }}>
+        <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed' }}>
           <EnteteTableau label="Solde" />
           <tbody>
             {vue === 'atterrissage' && (
