@@ -56,6 +56,7 @@ export function DataProvider({ children }) {
   const [budgetMoisClos, setBudgetMoisClos] = useState([])
   const [comptesIndyMapping, setComptesIndyMapping] = useState([])
   const [budgetAutresRecettes, setBudgetAutresRecettes] = useState([])
+  const [budgetSoldeInitial, setBudgetSoldeInitial] = useState([])
   const [parametres, setParametres] = useState({})
   const [loading, setLoading] = useState(true)
   const [online, setOnline] = useState(navigator.onLine)
@@ -94,6 +95,7 @@ export function DataProvider({ children }) {
         setBudgetMoisClos(cached.budgetMoisClos || [])
         setComptesIndyMapping(cached.comptesIndyMapping || [])
         setBudgetAutresRecettes(cached.budgetAutresRecettes || [])
+        setBudgetSoldeInitial(cached.budgetSoldeInitial || [])
       }
       setLoading(false)
       return
@@ -104,7 +106,7 @@ export function DataProvider({ children }) {
         { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }, { data: bc }, { data: sc }, { data: je },
         { data: st }, { data: sg }, { data: si }, { data: sp },
         { data: bp }, { data: br }, { data: brp },
-        { data: ri }, { data: bit }, { data: bat }, { data: bal }, { data: bmc }, { data: cim }, { data: bar }
+        { data: ri }, { data: bit }, { data: bat }, { data: bal }, { data: bmc }, { data: cim }, { data: bar }, { data: bsi }
       ] = await Promise.all([
         supabase.from('cours').select('*').order('jour').order('heure'),
         supabase.from('membres').select('*').order('nom'),
@@ -132,10 +134,11 @@ export function DataProvider({ children }) {
         supabase.from('budget_mois_clos').select('*'),
         supabase.from('comptes_indy_mapping').select('*'),
         supabase.from('budget_autres_recettes').select('*'),
+        supabase.from('budget_solde_initial').select('*'),
       ])
 
       const paramsObj = Object.fromEntries((p||[]).map(x => [x.cle, x.valeur]))
-      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[], budgetPrevisionnel: bp||[], budgetReel: br||[], budgetRepartition: brp||[], regroupementsIndy: ri||[], budgetIndyTotaux: bit||[], budgetAtterrissage: bat||[], budgetAtterrissageLignes: bal||[], budgetMoisClos: bmc||[], comptesIndyMapping: cim||[], budgetAutresRecettes: bar||[] }
+      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[], budgetPrevisionnel: bp||[], budgetReel: br||[], budgetRepartition: brp||[], regroupementsIndy: ri||[], budgetIndyTotaux: bit||[], budgetAtterrissage: bat||[], budgetAtterrissageLignes: bal||[], budgetMoisClos: bmc||[], comptesIndyMapping: cim||[], budgetAutresRecettes: bar||[], budgetSoldeInitial: bsi||[] }
       setCours(data.cours)
       setMembres(data.membres)
       setInscriptions(data.inscriptions)
@@ -162,6 +165,7 @@ export function DataProvider({ children }) {
       setBudgetMoisClos(data.budgetMoisClos)
       setComptesIndyMapping(data.comptesIndyMapping)
       setBudgetAutresRecettes(data.budgetAutresRecettes)
+      setBudgetSoldeInitial(data.budgetSoldeInitial)
       saveCache(data)
     } catch(e) {
       console.error('loadAll error:', e)
@@ -194,6 +198,7 @@ export function DataProvider({ children }) {
         setBudgetMoisClos(cached.budgetMoisClos || [])
         setComptesIndyMapping(cached.comptesIndyMapping || [])
         setBudgetAutresRecettes(cached.budgetAutresRecettes || [])
+        setBudgetSoldeInitial(cached.budgetSoldeInitial || [])
       }
     }
     setLoading(false)
@@ -272,6 +277,7 @@ export function DataProvider({ children }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_mois_clos' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comptes_indy_mapping' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_autres_recettes' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_solde_initial' }, loadAll)
       .subscribe()
 
     return () => { if (realtimeSub.current) supabase.removeChannel(realtimeSub.current) }
@@ -917,6 +923,26 @@ export function DataProvider({ children }) {
     }
   }
 
+  // Solde bancaire initial (au 01/08), une valeur par saison — s'ajoute au solde
+  // cumulé affiché (Prévisionnel/Réel/Atterrissage) mais pas à l'Écart.
+  async function sauvegarderSoldeInitial(saison, montant) {
+    const data = { saison, montant }
+    setBudgetSoldeInitial(prev => {
+      const idx = prev.findIndex(s => s.saison === saison)
+      if (idx >= 0) { const n = [...prev]; n[idx] = { ...n[idx], ...data }; return n }
+      return [...prev, data]
+    })
+    if (!navigator.onLine) { enqueue({ action: 'upsert', table: 'budget_solde_initial', payload: data }); return { offline: true } }
+    try {
+      const { error } = await supabase.from('budget_solde_initial').upsert(data, { onConflict: 'saison' })
+      if (error) throw error
+      return { success: true }
+    } catch(e) {
+      enqueue({ action: 'upsert', table: 'budget_solde_initial', payload: data })
+      return { queued: true }
+    }
+  }
+
   // ─── REGROUPEMENTS INDY (paramétrage) ─────────────────────────
   async function sauvegarderRegroupement(payload) {
     const isNew = !payload.id
@@ -1406,7 +1432,7 @@ export function DataProvider({ children }) {
     budgetCoursPrevisionnel, saisonsCalendrier, joursExceptionnels,
     stages, stagiaires, stageInscriptions, stagePresences,
     budgetPrevisionnel, budgetReel, budgetRepartition,
-    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetAtterrissageLignes, budgetMoisClos, comptesIndyMapping, budgetAutresRecettes,
+    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetAtterrissageLignes, budgetMoisClos, comptesIndyMapping, budgetAutresRecettes, budgetSoldeInitial,
     loading, online, syncing, queueSize,
     // Actions
     loadAll,
@@ -1425,7 +1451,7 @@ export function DataProvider({ children }) {
     sauvegarderSaisonCalendrier, sauvegarderJourExceptionnel, supprimerJourExceptionnel,
     sauvegarderStage, archiverStage, sauvegarderStagiaire, inscrireStagiaire, desinscrireStagiaire, sauvegarderPresenceStage,
     sauvegarderLigneBudgetMensuel, supprimerLigneBudgetMensuel, sauvegarderRepartition,
-    sauvegarderRegroupement, supprimerRegroupement, sauvegarderIndyTotal, sauvegarderAtterrissage, sauvegarderAtterrissageLigne, toggleMoisClos,
+    sauvegarderRegroupement, supprimerRegroupement, sauvegarderIndyTotal, sauvegarderAtterrissage, sauvegarderAtterrissageLigne, toggleMoisClos, sauvegarderSoldeInitial,
     sauvegarderCompteMapping, importerFEC, sauvegarderAutreRecette, supprimerAutreRecette,
     definirParametre,
     importerLot,
