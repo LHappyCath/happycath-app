@@ -679,7 +679,10 @@ function fmtEurosSigne(n) {
 // Atterrissage — même logique que l'onglet Mensuel (répartition des recettes cours,
 // lignes miroir, ajustements d'atterrissage), pour alimenter le graphique.
 function calculerEvolutionBudget(saison, ctx) {
-  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos } = ctx
+  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres } = ctx
+
+  let mappingCategoriesCours = {}
+  try { mappingCategoriesCours = JSON.parse((parametres||{}).regroupements_indy_categories_cours || '{}') } catch(e) {}
 
   const repRow = budgetRepartition.find(r => r.saison === saison) || {}
   const rep = Object.fromEntries(MOIS_CLES.map(m => [m, Number(repRow[m])||0]))
@@ -694,6 +697,10 @@ function calculerEvolutionBudget(saison, ctx) {
     if (!ca) continue
     const valeurs = MOIS_CLES.map(m => Math.round(ca * (rep[m]||0) / 100 * 100) / 100)
     parCategorie[c.categorie].push({ valeurs })
+  }
+  const totalParCategorieCoursMois = {
+    Gym: MOIS_CLES.map((_,i) => parCategorie.Gym.reduce((s,l) => s + l.valeurs[i], 0)),
+    Danse: MOIS_CLES.map((_,i) => parCategorie.Danse.reduce((s,l) => s + l.valeurs[i], 0)),
   }
   const lignesCoursValeurs = [...parCategorie.Gym, ...parCategorie.Danse]
     .map(l => Object.fromEntries(MOIS_CLES.map((m,i) => [m, l.valeurs[i]])))
@@ -733,7 +740,15 @@ function calculerEvolutionBudget(saison, ctx) {
     const parCle = new Map()
     for (const l of prevLignes) { const cle = l.lien || ('p_' + l.id); if (!parCle.has(cle)) parCle.set(cle, {}); parCle.get(cle).prev = l }
     for (const l of reelLignes) { const cle = l.lien || ('r_' + l.id); if (!parCle.has(cle)) parCle.set(cle, {}); parCle.get(cle).reel = l }
-    return [...parCle.entries()].map(([, { prev, reel }]) => ({ valeursPrev: valeursDeLigne(prev), valeursReel: valeursDeLigne(reel), cle: prev?.lien || reel?.lien || prev?.id || reel?.id }))
+    const paires = [...parCle.entries()].map(([, { prev, reel }]) => ({ valeursPrev: valeursDeLigne(prev), valeursReel: valeursDeLigne(reel), cle: prev?.lien || reel?.lien || prev?.id || reel?.id }))
+    if (type === 'recette' && regroupementId) {
+      for (const cat of ['Gym', 'Danse']) {
+        if (mappingCategoriesCours[cat] === regroupementId) {
+          paires.push({ valeursPrev: totalParCategorieCoursMois[cat], valeursReel: MOIS_CLES.map(()=>0), cle: 'cours_' + cat })
+        }
+      }
+    }
+    return paires
   }
 
   function valeursAtterrissage(regroupementId, type) {
@@ -892,11 +907,11 @@ function GraphiqueEvolution({ soldePrevCumule, soldeReelCumule, soldeAtterrissag
 
 // ─── ONGLET GRAPHIQUE ────────────────────────────────────────────────
 function OngletGraphique({ saison }) {
-  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos } = useData()
+  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres } = useData()
 
   const donnees = useMemo(() => calculerEvolutionBudget(saison, {
-    cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos
-  }), [saison, cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos])
+    cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres
+  }), [saison, cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres])
 
   const { soldePrevCumule, soldeReelCumule, soldeAtterrissageCumule, dernierMoisAvecReel } = donnees
 
@@ -1125,15 +1140,18 @@ function BlocRegroupementEcart({ nom, type, paires, ouvert, onToggle }) {
 // Bloc d'un regroupement dans la vue Réel : sous-total, total Indy, écart, détail des lignes
 // avecIndy=true (vue Réel) : affiche en plus le total de contrôle Indy et l'écart.
 // avecIndy=false (vue Prévisionnel) : juste le sous-total du regroupement + détail.
-function BlocRegroupementReel({ regroupement, nom, lignes, indyRow, avecIndy, ouvert, onToggle, onSaveIndy, onSaveLigne, onDeleteLigne, onAjouterLigne, onEditLigne }) {
-  const sousTotal = totalParMois(lignes)
+function BlocRegroupementReel({ regroupement, nom, lignes, lignesCoursVirtuelles, indyRow, avecIndy, ouvert, onToggle, onSaveIndy, onSaveLigne, onDeleteLigne, onAjouterLigne, onEditLigne }) {
+  const sousTotalLignes = totalParMois(lignes)
+  const sousTotalCours = MOIS_CLES.map((_,i) => (lignesCoursVirtuelles||[]).reduce((s,l) => s + l.valeurs[i], 0))
+  const sousTotal = sousTotalLignes.map((v,i) => v + sousTotalCours[i])
   const indyValeurs = MOIS_CLES.map(m => Number(indyRow?.[m] || 0))
   const ecart = sousTotal.map((v,i) => indyValeurs[i] - v)
+  const nbLignes = lignes.length + (lignesCoursVirtuelles||[]).length
   return (
     <>
       <tr onClick={onToggle} style={{ cursor:'pointer', background:'#f7f7f8' }}>
         <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, position:'sticky', left:0, background:'#f7f7f8', ...COL_LIBELLE }}>
-          {ouvert ? '▾' : '▸'} {nom} <span style={{ color:'#aaa', fontWeight:400 }}>({lignes.length})</span>
+          {ouvert ? '▾' : '▸'} {nom} <span style={{ color:'#aaa', fontWeight:400 }}>({nbLignes})</span>
         </td>
         {sousTotal.map((v,i) => <td key={i} style={{ padding:'6px 4px', fontSize:12, textAlign:'right', fontWeight:600 }}>{v ? fmtEuros(v) : '—'}</td>)}
         <td style={{ padding:'6px 8px', fontSize:12, fontWeight:700, textAlign:'right' }}>{fmtEuros(sousTotal.reduce((s,v)=>s+v,0))}</td>
@@ -1143,6 +1161,9 @@ function BlocRegroupementReel({ regroupement, nom, lignes, indyRow, avecIndy, ou
         <>
           {avecIndy && <LigneIndyTotal valeurs={indyRow || {}} onSave={onSaveIndy} />}
           {avecIndy && <LigneEcart valeurs={ecart} />}
+          {(lignesCoursVirtuelles||[]).map(l => (
+            <LigneCalculee key={l.nom} libelle={`${l.nom} (calculé, voir Recettes par cours)`} valeurs={l.valeurs} sousLigne />
+          ))}
           {lignes.map(l => (
             <LigneMensuelle key={l.id} ligne={l} onSave={onSaveLigne} onDelete={()=>onDeleteLigne(l)} onEdit={onEditLigne ? ()=>onEditLigne(l) : undefined} />
           ))}
@@ -1514,12 +1535,22 @@ function OngletMensuel({ saison, showToast }) {
     const parCle = new Map()
     for (const l of prevLignes) { const cle = l.lien || ('p_' + l.id); if (!parCle.has(cle)) parCle.set(cle, {}); parCle.get(cle).prev = l }
     for (const l of reelLignes) { const cle = l.lien || ('r_' + l.id); if (!parCle.has(cle)) parCle.set(cle, {}); parCle.get(cle).reel = l }
-    return [...parCle.entries()].map(([cle, { prev, reel }]) => ({
+    const paires = [...parCle.entries()].map(([cle, { prev, reel }]) => ({
       key: cle,
       libelle: reel?.libelle || prev?.libelle || '(sans nom)',
       valeursPrev: valeursDeLigne(prev),
       valeursReel: valeursDeLigne(reel),
     }))
+    // Recettes cours (Gym/Danse) mappées sur ce regroupement : injectées côté prévisionnel
+    // uniquement (le réel de ces cours arrive via les lignes réelles saisies séparément).
+    if (type === 'recette' && regroupementId) {
+      for (const cat of ['Gym', 'Danse']) {
+        if (mappingCategoriesCours[cat] === regroupementId) {
+          paires.push({ key: 'cours_' + cat, libelle: `${cat} (calculé, voir Recettes par cours)`, valeursPrev: totalParCategorieCoursMois[cat], valeursReel: MOIS_CLES.map(()=>0) })
+        }
+      }
+    }
+    return paires
   }
 
   // Écart réel / prévisionnel global (indépendant du toggle d'affichage)
@@ -1680,6 +1711,7 @@ function OngletMensuel({ saison, showToast }) {
               {(vue === 'previsionnel' || vue === 'reel') && regroupementsRecette.map(r => (
                 <BlocRegroupementReel key={r.id} regroupement={r} nom={r.nom} avecIndy={vue === 'reel'}
                   lignes={vue === 'reel' ? lignesReelDuRegroupement(r.id, 'recette') : lignesRecetteLibres.filter(l => (l.regroupement_id||null) === r.id)}
+                  lignesCoursVirtuelles={vue === 'previsionnel' ? ['Gym','Danse'].filter(cat => mappingCategoriesCours[cat] === r.id).map(cat => ({ nom: cat, valeurs: totalParCategorieCoursMois[cat] })) : []}
                   indyRow={vue === 'reel' ? budgetIndyTotaux.find(t => t.regroupement_id === r.id && t.saison === saison) : null}
                   ouvert={!!ouvertes['r_'+r.id]} onToggle={()=>setOuvertes(o=>({...o, ['r_'+r.id]: !o['r_'+r.id]}))}
                   onSaveIndy={(champ)=>handleSaveIndyTotal(r.id, champ)}
