@@ -52,6 +52,7 @@ export function DataProvider({ children }) {
   const [regroupementsIndy, setRegroupementsIndy] = useState([])
   const [budgetIndyTotaux, setBudgetIndyTotaux] = useState([])
   const [budgetAtterrissage, setBudgetAtterrissage] = useState([])
+  const [budgetAtterrissageLignes, setBudgetAtterrissageLignes] = useState([])
   const [budgetMoisClos, setBudgetMoisClos] = useState([])
   const [parametres, setParametres] = useState({})
   const [loading, setLoading] = useState(true)
@@ -87,6 +88,7 @@ export function DataProvider({ children }) {
         setRegroupementsIndy(cached.regroupementsIndy || [])
         setBudgetIndyTotaux(cached.budgetIndyTotaux || [])
         setBudgetAtterrissage(cached.budgetAtterrissage || [])
+        setBudgetAtterrissageLignes(cached.budgetAtterrissageLignes || [])
         setBudgetMoisClos(cached.budgetMoisClos || [])
       }
       setLoading(false)
@@ -98,7 +100,7 @@ export function DataProvider({ children }) {
         { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }, { data: bc }, { data: sc }, { data: je },
         { data: st }, { data: sg }, { data: si }, { data: sp },
         { data: bp }, { data: br }, { data: brp },
-        { data: ri }, { data: bit }, { data: bat }, { data: bmc }
+        { data: ri }, { data: bit }, { data: bat }, { data: bal }, { data: bmc }
       ] = await Promise.all([
         supabase.from('cours').select('*').order('jour').order('heure'),
         supabase.from('membres').select('*').order('nom'),
@@ -122,11 +124,12 @@ export function DataProvider({ children }) {
         supabase.from('regroupements_indy').select('*'),
         supabase.from('budget_indy_totaux').select('*'),
         supabase.from('budget_atterrissage').select('*'),
+        supabase.from('budget_atterrissage_lignes').select('*'),
         supabase.from('budget_mois_clos').select('*'),
       ])
 
       const paramsObj = Object.fromEntries((p||[]).map(x => [x.cle, x.valeur]))
-      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[], budgetPrevisionnel: bp||[], budgetReel: br||[], budgetRepartition: brp||[], regroupementsIndy: ri||[], budgetIndyTotaux: bit||[], budgetAtterrissage: bat||[], budgetMoisClos: bmc||[] }
+      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[], budgetPrevisionnel: bp||[], budgetReel: br||[], budgetRepartition: brp||[], regroupementsIndy: ri||[], budgetIndyTotaux: bit||[], budgetAtterrissage: bat||[], budgetAtterrissageLignes: bal||[], budgetMoisClos: bmc||[] }
       setCours(data.cours)
       setMembres(data.membres)
       setInscriptions(data.inscriptions)
@@ -149,6 +152,7 @@ export function DataProvider({ children }) {
       setRegroupementsIndy(data.regroupementsIndy)
       setBudgetIndyTotaux(data.budgetIndyTotaux)
       setBudgetAtterrissage(data.budgetAtterrissage)
+      setBudgetAtterrissageLignes(data.budgetAtterrissageLignes)
       setBudgetMoisClos(data.budgetMoisClos)
       saveCache(data)
     } catch(e) {
@@ -178,6 +182,7 @@ export function DataProvider({ children }) {
         setRegroupementsIndy(cached.regroupementsIndy || [])
         setBudgetIndyTotaux(cached.budgetIndyTotaux || [])
         setBudgetAtterrissage(cached.budgetAtterrissage || [])
+        setBudgetAtterrissageLignes(cached.budgetAtterrissageLignes || [])
         setBudgetMoisClos(cached.budgetMoisClos || [])
       }
     }
@@ -253,6 +258,7 @@ export function DataProvider({ children }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'regroupements_indy' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_indy_totaux' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_atterrissage' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_atterrissage_lignes' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_mois_clos' }, loadAll)
       .subscribe()
 
@@ -955,6 +961,26 @@ export function DataProvider({ children }) {
     }
   }
 
+  // ─── ATTERRISSAGE LIGNE À LIGNE (ajustement d'une ligne miroir, via son lien) ──
+  async function sauvegarderAtterrissageLigne(lien, saison, valeurs) {
+    const existant = budgetAtterrissageLignes.find(a => a.lien === lien && a.saison === saison)
+    const data = { ...(existant || {}), lien, saison, ...valeurs }
+    setBudgetAtterrissageLignes(prev => {
+      const idx = prev.findIndex(a => a.lien === lien && a.saison === saison)
+      if (idx >= 0) { const n = [...prev]; n[idx] = data; return n }
+      return [...prev, data]
+    })
+    if (!navigator.onLine) { enqueue({ action: 'upsert', table: 'budget_atterrissage_lignes', payload: data }); return { offline: true } }
+    try {
+      const { error } = await supabase.from('budget_atterrissage_lignes').upsert(data, { onConflict: 'lien,saison' })
+      if (error) throw error
+      return { success: true }
+    } catch(e) {
+      enqueue({ action: 'upsert', table: 'budget_atterrissage_lignes', payload: data })
+      return { queued: true }
+    }
+  }
+
   // ─── CLÔTURE MENSUELLE (par saison, un mois clôture tous les regroupements) ──
   async function toggleMoisClos(saison, mois, clos) {
     const existant = budgetMoisClos.find(m => m.saison === saison)
@@ -1229,7 +1255,7 @@ export function DataProvider({ children }) {
     budgetCoursPrevisionnel, saisonsCalendrier, joursExceptionnels,
     stages, stagiaires, stageInscriptions, stagePresences,
     budgetPrevisionnel, budgetReel, budgetRepartition,
-    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetMoisClos,
+    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetAtterrissageLignes, budgetMoisClos,
     loading, online, syncing, queueSize,
     // Actions
     loadAll,
@@ -1248,7 +1274,7 @@ export function DataProvider({ children }) {
     sauvegarderSaisonCalendrier, sauvegarderJourExceptionnel, supprimerJourExceptionnel,
     sauvegarderStage, archiverStage, sauvegarderStagiaire, inscrireStagiaire, desinscrireStagiaire, sauvegarderPresenceStage,
     sauvegarderLigneBudgetMensuel, supprimerLigneBudgetMensuel, sauvegarderRepartition,
-    sauvegarderRegroupement, supprimerRegroupement, sauvegarderIndyTotal, sauvegarderAtterrissage, toggleMoisClos,
+    sauvegarderRegroupement, supprimerRegroupement, sauvegarderIndyTotal, sauvegarderAtterrissage, sauvegarderAtterrissageLigne, toggleMoisClos,
     definirParametre,
     importerLot,
     mettreAJourMembres,
