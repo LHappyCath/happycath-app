@@ -671,11 +671,13 @@ function fmtEurosSigne(n) {
 }
 
 // Formulaire pour créer une nouvelle ligne libre (recette ou charge)
-function FormLigneBudget({ type, regroupements, regroupementParDefaut, onClose, onCree }) {
-  const [form, setForm] = useState({ regroupement_id: regroupementParDefaut || '', libelle:'', entite:'Asso' })
+function FormLigneBudget({ type, regroupements, regroupementParDefaut, initial, onClose, onCree }) {
+  const [form, setForm] = useState(initial
+    ? { libelle: initial.libelle, regroupement_id: initial.regroupement_id || '', entite: initial.entite || 'Asso' }
+    : { regroupement_id: regroupementParDefaut || '', libelle:'', entite:'Asso' })
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
   return (
-    <Modal titre={type === 'recette' ? 'Nouvelle ligne de recette' : 'Nouvelle ligne de charge'} onClose={onClose}>
+    <Modal titre={initial ? 'Modifier la ligne' : (type === 'recette' ? 'Nouvelle ligne de recette' : 'Nouvelle ligne de charge')} onClose={onClose}>
       <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
         <div>
           <label style={LABEL}>Libellé *</label>
@@ -697,7 +699,7 @@ function FormLigneBudget({ type, regroupements, regroupementParDefaut, onClose, 
         <div style={{ display:'flex', gap:8, paddingTop:4 }}>
           <button style={{ ...BTN.ghost, flex:1 }} onClick={onClose}>Annuler</button>
           <button style={{ ...BTN.primary, flex:2 }} disabled={!form.libelle.trim()}
-            onClick={()=>onCree({ ...form, regroupement_id: form.regroupement_id || null })}>Ajouter</button>
+            onClick={()=>onCree({ ...form, regroupement_id: form.regroupement_id || null })}>{initial ? 'Enregistrer' : 'Ajouter'}</button>
         </div>
       </div>
     </Modal>
@@ -705,7 +707,7 @@ function FormLigneBudget({ type, regroupements, regroupementParDefaut, onClose, 
 }
 
 // Une ligne éditable (mois par mois) dans un tableau prévisionnel/réel
-function LigneMensuelle({ ligne, nomRegroupement, onSave, onDelete }) {
+function LigneMensuelle({ ligne, nomRegroupement, onSave, onDelete, onEdit }) {
   const [local, setLocal] = useState(() => Object.fromEntries(MOIS_CLES.map(m => [m, ligne[m] ?? 0])))
   function setMois(m, v) { setLocal(l => ({ ...l, [m]: v })) }
   function blurMois(m) {
@@ -726,7 +728,8 @@ function LigneMensuelle({ ligne, nomRegroupement, onSave, onDelete }) {
         </td>
       ))}
       <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, textAlign:'right', whiteSpace:'nowrap' }}>{fmtEuros(totalLigne(local))}</td>
-      <td style={{ padding:'6px 4px' }}>
+      <td style={{ padding:'6px 4px', whiteSpace:'nowrap' }}>
+        {onEdit && <button onClick={onEdit} title="Modifier le libellé / regroupement" style={{ background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:13, marginRight:4 }}>✏️</button>}
         <button onClick={onDelete} style={{ background:'none', border:'none', cursor:'pointer', color:'#ddd', fontSize:13 }}>🗑</button>
       </td>
     </tr>
@@ -795,7 +798,7 @@ function LigneEcart({ valeurs }) {
 // Bloc d'un regroupement dans la vue Réel : sous-total, total Indy, écart, détail des lignes
 // avecIndy=true (vue Réel) : affiche en plus le total de contrôle Indy et l'écart.
 // avecIndy=false (vue Prévisionnel) : juste le sous-total du regroupement + détail.
-function BlocRegroupementReel({ regroupement, nom, lignes, indyRow, avecIndy, ouvert, onToggle, onSaveIndy, onSaveLigne, onDeleteLigne, onAjouterLigne }) {
+function BlocRegroupementReel({ regroupement, nom, lignes, indyRow, avecIndy, ouvert, onToggle, onSaveIndy, onSaveLigne, onDeleteLigne, onAjouterLigne, onEditLigne }) {
   const sousTotal = totalParMois(lignes)
   const indyValeurs = MOIS_CLES.map(m => Number(indyRow?.[m] || 0))
   const ecart = sousTotal.map((v,i) => indyValeurs[i] - v)
@@ -814,7 +817,7 @@ function BlocRegroupementReel({ regroupement, nom, lignes, indyRow, avecIndy, ou
           {avecIndy && <LigneIndyTotal valeurs={indyRow || {}} onSave={onSaveIndy} />}
           {avecIndy && <LigneEcart valeurs={ecart} />}
           {lignes.map(l => (
-            <LigneMensuelle key={l.id} ligne={l} onSave={onSaveLigne} onDelete={()=>onDeleteLigne(l)} />
+            <LigneMensuelle key={l.id} ligne={l} onSave={onSaveLigne} onDelete={()=>onDeleteLigne(l)} onEdit={onEditLigne ? ()=>onEditLigne(l) : undefined} />
           ))}
           <tr>
             <td colSpan={15} style={{ padding:'4px 8px' }}>
@@ -883,8 +886,8 @@ function BarreCloture({ moisClos, ecartsParMois, onToggle }) {
 }
 
 // Panneau de paramétrage des regroupements Indy
-function PanneauParametres({ regroupementsIndy, regroupementCoursId, onClose, showToast }) {
-  const { sauvegarderRegroupement, supprimerRegroupement, definirParametre } = useData()
+function PanneauParametres({ regroupementsIndy, onClose, showToast }) {
+  const { cours, parametres, sauvegarderRegroupement, supprimerRegroupement, definirParametre } = useData()
   const [nouveau, setNouveau] = useState({ nom:'', type:'charge' })
 
   async function ajouter() {
@@ -905,12 +908,18 @@ function PanneauParametres({ regroupementsIndy, regroupementCoursId, onClose, sh
     await supprimerRegroupement(r.id)
   }
 
-  async function definirRegroupementCours(id) {
-    await definirParametre('regroupement_indy_cours', id)
-  }
-
   const regroupementsRecette = regroupementsIndy.filter(r => r.type === 'recette')
   const regroupementsCharge = regroupementsIndy.filter(r => r.type === 'charge')
+
+  const categoriesCours = [...new Set(cours.map(c => c.categorie).filter(Boolean))].sort()
+  let mappingCategoriesCours = {}
+  try { mappingCategoriesCours = JSON.parse(parametres.regroupements_indy_categories_cours || '{}') } catch(e) {}
+
+  async function definirRegroupementCategorie(cat, regroupementId) {
+    const nouveauMapping = { ...mappingCategoriesCours, [cat]: regroupementId || undefined }
+    const nettoye = Object.fromEntries(Object.entries(nouveauMapping).filter(([,v]) => v))
+    await definirParametre('regroupements_indy_categories_cours', JSON.stringify(nettoye))
+  }
 
   return (
     <Modal titre="Paramètres — Regroupements Indy" onClose={onClose}>
@@ -932,11 +941,7 @@ function PanneauParametres({ regroupementsIndy, regroupementCoursId, onClose, sh
       {regroupementsRecette.map(r => (
         <div key={r.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 0', borderTop:'0.5px solid #f5f5f5' }}>
           <span style={{ flex:1, fontSize:13 }}>{r.nom}</span>
-          {regroupementCoursId === r.id && <span style={{ fontSize:10, color:'#FF0099', fontWeight:500 }}>= Cours</span>}
           <button style={{ ...BTN.small, fontSize:11 }} onClick={()=>renommer(r)}>Renommer</button>
-          {regroupementCoursId !== r.id && (
-            <button style={{ ...BTN.small, fontSize:11 }} onClick={()=>definirRegroupementCours(r.id)}>Utiliser pour "Cours"</button>
-          )}
           <button onClick={()=>supprimer(r)} style={{ background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:13 }}>🗑</button>
         </div>
       ))}
@@ -948,6 +953,19 @@ function PanneauParametres({ regroupementsIndy, regroupementCoursId, onClose, sh
           <span style={{ flex:1, fontSize:13 }}>{r.nom}</span>
           <button style={{ ...BTN.small, fontSize:11 }} onClick={()=>renommer(r)}>Renommer</button>
           <button onClick={()=>supprimer(r)} style={{ background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:13 }}>🗑</button>
+        </div>
+      ))}
+
+      <p style={{ ...LABEL, marginTop:16 }}>Recettes cours — regroupement Indy par catégorie</p>
+      <p style={{ fontSize:11, color:'#aaa', marginBottom:8 }}>Le CA prévu de chaque catégorie de cours (Gym, Danse...) alimente le regroupement choisi ici, pour être comparable au réel.</p>
+      {categoriesCours.length === 0 && <p style={{ fontSize:12, color:'#aaa' }}>Aucune catégorie de cours trouvée.</p>}
+      {categoriesCours.map(cat => (
+        <div key={cat} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 0', borderTop:'0.5px solid #f5f5f5' }}>
+          <span style={{ flex:1, fontSize:13 }}>{cat}</span>
+          <select style={{ ...INPUT, width:220 }} value={mappingCategoriesCours[cat] || ''} onChange={e=>definirRegroupementCategorie(cat, e.target.value)}>
+            <option value="">Non classé</option>
+            {regroupementsRecette.map(r => <option key={r.id} value={r.id}>{r.nom}</option>)}
+          </select>
         </div>
       ))}
     </Modal>
@@ -986,7 +1004,9 @@ function OngletMensuel({ saison, showToast }) {
   const lignesRecetteLibres = lignesBrutes.filter(l => l.type === 'recette')
   const lignesCharges = lignesBrutes.filter(l => l.type === 'charge')
 
-  const regroupementCoursId = parametres.regroupement_indy_cours || null
+  const mappingCategoriesCours = useMemo(() => {
+    try { return JSON.parse(parametres.regroupements_indy_categories_cours || '{}') } catch(e) { return {} }
+  }, [parametres.regroupements_indy_categories_cours])
   const regroupementsRecette = regroupementsIndy.filter(r => r.type === 'recette')
   const regroupementsCharge = regroupementsIndy.filter(r => r.type === 'charge')
   function nomRegroupement(id) { return id ? (regroupementsIndy.find(r => r.id === id)?.nom || 'Non classé') : 'Non classé' }
@@ -1012,7 +1032,10 @@ function OngletMensuel({ saison, showToast }) {
     }
     return groupes
   }, [cours, budgetCoursPrevisionnel, saison, repLocal])
-  const totalCoursMois = MOIS_CLES.map((_,i) => [...parCategorie.Gym, ...parCategorie.Danse].reduce((s,l) => s + l.valeurs[i], 0))
+  const totalParCategorieCoursMois = {
+    Gym: MOIS_CLES.map((_,i) => parCategorie.Gym.reduce((s,l) => s + l.valeurs[i], 0)),
+    Danse: MOIS_CLES.map((_,i) => parCategorie.Danse.reduce((s,l) => s + l.valeurs[i], 0)),
+  }
 
   async function handleSaveRepartition() {
     const res = await sauvegarderRepartition(saison, Object.fromEntries(MOIS_CLES.map(m => [m, Number(repLocal[m])||0])))
@@ -1020,8 +1043,9 @@ function OngletMensuel({ saison, showToast }) {
     else showToast('Répartition enregistrée')
   }
 
-  async function handleCreerLigne(type, regroupementId, form) {
-    const res = await sauvegarderLigneBudgetMensuel(table, { type, saison, ...form, ...zerosMois() })
+  async function handleCreerLigne(type, regroupementId, form, initial) {
+    const payload = initial ? { ...initial, ...form } : { type, saison, ...form, ...zerosMois() }
+    const res = await sauvegarderLigneBudgetMensuel(table, payload)
     if (res?.error) showToast('Erreur : ' + res.error)
     setModalLigne(null)
   }
@@ -1051,8 +1075,12 @@ function OngletMensuel({ saison, showToast }) {
   function referencePrevisionnelle(regroupementId, type) {
     const lignes = lignesPrevSaison.filter(l => l.type === type && (l.regroupement_id || null) === regroupementId)
     let valeurs = totalParMois(lignes)
-    if (type === 'recette' && regroupementId && regroupementId === regroupementCoursId) {
-      valeurs = valeurs.map((v,i) => v + totalCoursMois[i])
+    if (type === 'recette' && regroupementId) {
+      for (const cat of ['Gym', 'Danse']) {
+        if (mappingCategoriesCours[cat] === regroupementId) {
+          valeurs = valeurs.map((v,i) => v + totalParCategorieCoursMois[cat][i])
+        }
+      }
     }
     return valeurs
   }
@@ -1198,7 +1226,8 @@ function OngletMensuel({ saison, showToast }) {
                   ouvert={!!ouvertes['r_'+r.id]} onToggle={()=>setOuvertes(o=>({...o, ['r_'+r.id]: !o['r_'+r.id]}))}
                   onSaveIndy={(champ)=>handleSaveIndyTotal(r.id, champ)}
                   onSaveLigne={handleSaveLigne} onDeleteLigne={handleDeleteLigne}
-                  onAjouterLigne={(reg)=>setModalLigne({ type:'recette', regroupementId: reg.id })} />
+                  onAjouterLigne={(reg)=>setModalLigne({ type:'recette', regroupementId: reg.id })}
+                  onEditLigne={(l)=>setModalLigne({ type:'recette', regroupementId: l.regroupement_id, initial: l })} />
               ))}
               {lignesRecetteLibres.filter(l => !l.regroupement_id).length > 0 && (
                 <BlocRegroupementReel regroupement={null} nom="Non classé" avecIndy={false}
@@ -1207,12 +1236,13 @@ function OngletMensuel({ saison, showToast }) {
                   ouvert={!!ouvertes['r_nonclasse']} onToggle={()=>setOuvertes(o=>({...o, r_nonclasse: !o.r_nonclasse}))}
                   onSaveIndy={()=>{}}
                   onSaveLigne={handleSaveLigne} onDeleteLigne={handleDeleteLigne}
-                  onAjouterLigne={()=>setModalLigne({ type:'recette', regroupementId: null })} />
+                  onAjouterLigne={()=>setModalLigne({ type:'recette', regroupementId: null })}
+                  onEditLigne={(l)=>setModalLigne({ type:'recette', regroupementId: l.regroupement_id, initial: l })} />
               )}
             </tbody>
           </table>
           {vue === 'reel' && (
-            <p style={{ fontSize:11, color:'#aaa', marginTop:8 }}>Pour ajouter une ligne "Cours" (CB, chèques...), utilise le regroupement marqué "= Cours" dans les paramètres.</p>
+            <p style={{ fontSize:11, color:'#aaa', marginTop:8 }}>Le regroupement associé à une catégorie de cours (Gym, Danse...) dans les paramètres reçoit automatiquement le CA prévu de cette catégorie comme référence.</p>
           )}
           <button style={{ ...BTN.small, marginTop:8 }} onClick={()=>setModalLigne({ type:'recette', regroupementId:null })}>+ Ligne de recette</button>
         </div>
@@ -1230,7 +1260,8 @@ function OngletMensuel({ saison, showToast }) {
                   ouvert={!!ouvertes['c_'+r.id]} onToggle={()=>setOuvertes(o=>({...o, ['c_'+r.id]: !o['c_'+r.id]}))}
                   onSaveIndy={(champ)=>handleSaveIndyTotal(r.id, champ)}
                   onSaveLigne={handleSaveLigne} onDeleteLigne={handleDeleteLigne}
-                  onAjouterLigne={(reg)=>setModalLigne({ type:'charge', regroupementId: reg.id })} />
+                  onAjouterLigne={(reg)=>setModalLigne({ type:'charge', regroupementId: reg.id })}
+                  onEditLigne={(l)=>setModalLigne({ type:'charge', regroupementId: l.regroupement_id, initial: l })} />
               ))}
               {lignesCharges.filter(l => !l.regroupement_id).length > 0 && (
                 <BlocRegroupementReel regroupement={null} nom="Non classé" avecIndy={false}
@@ -1239,7 +1270,8 @@ function OngletMensuel({ saison, showToast }) {
                   ouvert={!!ouvertes['c_nonclasse']} onToggle={()=>setOuvertes(o=>({...o, c_nonclasse: !o.c_nonclasse}))}
                   onSaveIndy={()=>{}}
                   onSaveLigne={handleSaveLigne} onDeleteLigne={handleDeleteLigne}
-                  onAjouterLigne={()=>setModalLigne({ type:'charge', regroupementId: null })} />
+                  onAjouterLigne={()=>setModalLigne({ type:'charge', regroupementId: null })}
+                  onEditLigne={(l)=>setModalLigne({ type:'charge', regroupementId: l.regroupement_id, initial: l })} />
               )}
             </tbody>
           </table>
@@ -1322,12 +1354,13 @@ function OngletMensuel({ saison, showToast }) {
         <FormLigneBudget type={modalLigne.type}
           regroupements={modalLigne.type === 'recette' ? regroupementsRecette : regroupementsCharge}
           regroupementParDefaut={modalLigne.regroupementId}
+          initial={modalLigne.initial}
           onClose={()=>setModalLigne(null)}
-          onCree={(form)=>handleCreerLigne(modalLigne.type, modalLigne.regroupementId, form)} />
+          onCree={(form)=>handleCreerLigne(modalLigne.type, modalLigne.regroupementId, form, modalLigne.initial)} />
       )}
 
       {showParametres && (
-        <PanneauParametres regroupementsIndy={regroupementsIndy} regroupementCoursId={regroupementCoursId}
+        <PanneauParametres regroupementsIndy={regroupementsIndy}
           onClose={()=>setShowParametres(false)} showToast={showToast} />
       )}
     </div>
