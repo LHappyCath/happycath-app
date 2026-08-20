@@ -5,6 +5,11 @@ import { joursFeriesSaison, statutJour, compterSeances, joursDuMois, moisDeSaiso
 const JOURS_FULL = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi']
 const JOURS_COURTS = ['D','L','M','M','J','V','S']
 const CATEGORIES = ['Gym', 'Danse']
+const SECTIONS_AUTRES_RECETTES = [
+  { key: 'location', label: 'Location de salle', libelleUnitaire: 'Tarif horaire (€/h)', libelleQuantite: 'Heures' },
+  { key: 'prestation', label: 'Prestations extérieures', libelleUnitaire: 'Taux horaire (€/h)', libelleQuantite: 'Heures' },
+  { key: 'stage', label: 'Stages', libelleUnitaire: 'Prix du stage (€)', libelleQuantite: 'Stagiaires' },
+]
 
 const BTN = {
   primary: { padding:'9px 18px', borderRadius:8, border:'none', background:'#FF0099', color:'#fff', cursor:'pointer', fontSize:14, fontWeight:500 },
@@ -679,10 +684,12 @@ function fmtEurosSigne(n) {
 // Atterrissage — même logique que l'onglet Mensuel (répartition des recettes cours,
 // lignes miroir, ajustements d'atterrissage), pour alimenter le graphique.
 function calculerEvolutionBudget(saison, ctx) {
-  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres } = ctx
+  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres } = ctx
 
   let mappingCategoriesCours = {}
   try { mappingCategoriesCours = JSON.parse((parametres||{}).regroupements_indy_categories_cours || '{}') } catch(e) {}
+  let mappingAutresRecettes = {}
+  try { mappingAutresRecettes = JSON.parse((parametres||{}).regroupements_indy_autres_recettes || '{}') } catch(e) {}
 
   const repRow = budgetRepartition.find(r => r.saison === saison) || {}
   const rep = Object.fromEntries(MOIS_CLES.map(m => [m, Number(repRow[m])||0]))
@@ -702,8 +709,15 @@ function calculerEvolutionBudget(saison, ctx) {
     Gym: MOIS_CLES.map((_,i) => parCategorie.Gym.reduce((s,l) => s + l.valeurs[i], 0)),
     Danse: MOIS_CLES.map((_,i) => parCategorie.Danse.reduce((s,l) => s + l.valeurs[i], 0)),
   }
+  const totalParSectionAutresRecettesMois = {}
+  for (const sec of SECTIONS_AUTRES_RECETTES) {
+    const lignes = (budgetAutresRecettes||[]).filter(l => l.saison === saison && l.section === sec.key)
+    totalParSectionAutresRecettesMois[sec.key] = MOIS_CLES.map((m,i) => lignes.reduce((s,l) => s + Number(l.montant_unitaire||0) * Number(l[m]||0), 0))
+  }
   const lignesCoursValeurs = [...parCategorie.Gym, ...parCategorie.Danse]
     .map(l => Object.fromEntries(MOIS_CLES.map((m,i) => [m, l.valeurs[i]])))
+  const lignesAutresRecettesValeurs = SECTIONS_AUTRES_RECETTES
+    .map(sec => Object.fromEntries(MOIS_CLES.map((m,i) => [m, totalParSectionAutresRecettesMois[sec.key][i]])))
 
   const lignesPrevSaison = budgetPrevisionnel.filter(l => l.saison === saison)
   const lignesReelSaison = budgetReel.filter(l => l.saison === saison)
@@ -712,7 +726,7 @@ function calculerEvolutionBudget(saison, ctx) {
   const lignesRecetteReel = lignesReelSaison.filter(l => l.type === 'recette')
   const lignesChargeReel = lignesReelSaison.filter(l => l.type === 'charge')
 
-  const recettesPrevMois = totalParMois([...lignesCoursValeurs, ...lignesRecettePrev])
+  const recettesPrevMois = totalParMois([...lignesCoursValeurs, ...lignesAutresRecettesValeurs, ...lignesRecettePrev])
   const chargesPrevMois = totalParMois(lignesChargePrev)
   const recettesReelMois = totalParMois(lignesRecetteReel)
   const chargesReelMois = totalParMois(lignesChargeReel)
@@ -745,6 +759,11 @@ function calculerEvolutionBudget(saison, ctx) {
       for (const cat of ['Gym', 'Danse']) {
         if (mappingCategoriesCours[cat] === regroupementId) {
           paires.push({ valeursPrev: totalParCategorieCoursMois[cat], valeursReel: MOIS_CLES.map(()=>0), cle: 'cours_' + cat })
+        }
+      }
+      for (const sec of SECTIONS_AUTRES_RECETTES) {
+        if (mappingAutresRecettes[sec.key] === regroupementId) {
+          paires.push({ valeursPrev: totalParSectionAutresRecettesMois[sec.key], valeursReel: MOIS_CLES.map(()=>0), cle: 'autre_' + sec.key })
         }
       }
     }
@@ -907,11 +926,11 @@ function GraphiqueEvolution({ soldePrevCumule, soldeReelCumule, soldeAtterrissag
 
 // ─── ONGLET GRAPHIQUE ────────────────────────────────────────────────
 function OngletGraphique({ saison }) {
-  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres } = useData()
+  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres } = useData()
 
   const donnees = useMemo(() => calculerEvolutionBudget(saison, {
-    cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres
-  }), [saison, cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres])
+    cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres
+  }), [saison, cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, parametres])
 
   const { soldePrevCumule, soldeReelCumule, soldeAtterrissageCumule, dernierMoisAvecReel } = donnees
 
@@ -1296,6 +1315,15 @@ function PanneauParametres({ regroupementsIndy, onClose, showToast }) {
     await definirParametre('regroupements_indy_categories_cours', JSON.stringify(nettoye))
   }
 
+  let mappingAutresRecettes = {}
+  try { mappingAutresRecettes = JSON.parse(parametres.regroupements_indy_autres_recettes || '{}') } catch(e) {}
+
+  async function definirRegroupementAutreRecette(section, regroupementId) {
+    const nouveauMapping = { ...mappingAutresRecettes, [section]: regroupementId || undefined }
+    const nettoye = Object.fromEntries(Object.entries(nouveauMapping).filter(([,v]) => v))
+    await definirParametre('regroupements_indy_autres_recettes', JSON.stringify(nettoye))
+  }
+
   return (
     <Modal titre="Paramètres — Regroupements Indy" onClose={onClose}>
       <p style={{ fontSize:12, color:'#888', marginBottom:14 }}>
@@ -1338,6 +1366,18 @@ function PanneauParametres({ regroupementsIndy, onClose, showToast }) {
         <div key={cat} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 0', borderTop:'0.5px solid #f5f5f5' }}>
           <span style={{ flex:1, fontSize:13 }}>{cat}</span>
           <select style={{ ...INPUT, width:220 }} value={mappingCategoriesCours[cat] || ''} onChange={e=>definirRegroupementCategorie(cat, e.target.value)}>
+            <option value="">Non classé</option>
+            {regroupementsRecette.map(r => <option key={r.id} value={r.id}>{r.nom}</option>)}
+          </select>
+        </div>
+      ))}
+
+      <p style={{ ...LABEL, marginTop:16 }}>Autres recettes — regroupement Indy par section</p>
+      <p style={{ fontSize:11, color:'#aaa', marginBottom:8 }}>Le CA prévu de Location, Prestations et Stages (onglet "Autres recettes") alimente le regroupement choisi ici.</p>
+      {SECTIONS_AUTRES_RECETTES.map(sec => (
+        <div key={sec.key} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 0', borderTop:'0.5px solid #f5f5f5' }}>
+          <span style={{ flex:1, fontSize:13 }}>{sec.label}</span>
+          <select style={{ ...INPUT, width:220 }} value={mappingAutresRecettes[sec.key] || ''} onChange={e=>definirRegroupementAutreRecette(sec.key, e.target.value)}>
             <option value="">Non classé</option>
             {regroupementsRecette.map(r => <option key={r.id} value={r.id}>{r.nom}</option>)}
           </select>
@@ -1407,11 +1447,12 @@ function PanneauImportFEC({ onClose, showToast }) {
   )
 }
 
-function EnteteTableau({ label }) {
+function EnteteTableau({ label, libelleTarif }) {
   return (
     <thead>
       <tr>
         <th style={{ padding:'6px 8px', fontSize:11, fontWeight:500, color:'#888', textAlign:'left', position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>{label}</th>
+        {libelleTarif && <th style={{ padding:'6px 4px', fontSize:11, fontWeight:500, color:'#888', width:76 }}>{libelleTarif}</th>}
         {MOIS_COURTS.map(m => <th key={m} style={{ padding:'6px 4px', fontSize:11, fontWeight:500, color:'#888' }}>{m}</th>)}
         <th style={{ padding:'6px 8px', fontSize:11, fontWeight:500, color:'#888' }}>Total</th>
         <th />
@@ -1420,9 +1461,123 @@ function EnteteTableau({ label }) {
   )
 }
 
+// Formulaire de création/édition d'une ligne "Autres recettes" (nom + tarif unitaire ;
+// les quantités mensuelles se saisissent directement dans le tableau).
+function FormAutreRecette({ section, initial, onClose, onCree }) {
+  const sec = SECTIONS_AUTRES_RECETTES.find(s => s.key === section)
+  const [form, setForm] = useState({ nom: initial?.nom || '', montant_unitaire: initial?.montant_unitaire ?? 0 })
+  return (
+    <Modal titre={initial ? `Modifier — ${sec.label}` : `Nouvelle ligne — ${sec.label}`} onClose={onClose}>
+      <label style={LABEL}>Nom</label>
+      <input style={{ ...INPUT, marginBottom:12 }} value={form.nom} onChange={e=>setForm(f=>({...f, nom:e.target.value}))} placeholder="Ex : Parkinson Gym" />
+      <label style={LABEL}>{sec.libelleUnitaire}</label>
+      <input type="number" step="0.01" style={{ ...INPUT, marginBottom:16 }} value={form.montant_unitaire}
+        onChange={e=>setForm(f=>({...f, montant_unitaire: e.target.value}))} />
+      <button style={BTN.primary} disabled={!form.nom.trim()}
+        onClick={()=>onCree({ nom: form.nom.trim(), montant_unitaire: parseFloat(form.montant_unitaire)||0 })}>
+        {initial ? 'Enregistrer' : 'Créer'}
+      </button>
+    </Modal>
+  )
+}
+
+// Ligne d'une section "Autres recettes" : tarif fixe éditable + quantité par mois
+// (heures ou nb de participants) ; le CA de chaque mois se calcule automatiquement.
+function LigneAutreRecette({ ligne, onSave, onDelete, onEdit }) {
+  const [local, setLocal] = useState(() => ({ montant_unitaire: ligne.montant_unitaire ?? 0, ...Object.fromEntries(MOIS_CLES.map(m => [m, ligne[m] ?? 0])) }))
+  useEffect(() => {
+    setLocal({ montant_unitaire: ligne.montant_unitaire ?? 0, ...Object.fromEntries(MOIS_CLES.map(m => [m, ligne[m] ?? 0])) })
+  }, [ligne.id, ligne.montant_unitaire])
+  function setChamp(champ, v) { setLocal(l => ({ ...l, [champ]: v })) }
+  function blurChamp(champ) {
+    const val = parseFloat(local[champ])
+    const arrondi = isNaN(val) ? 0 : val
+    if (arrondi !== Number(ligne[champ]||0)) onSave({ ...ligne, [champ]: arrondi })
+  }
+  const tarif = Number(local.montant_unitaire) || 0
+  const totalQuantite = MOIS_CLES.reduce((s,m) => s + (Number(local[m])||0), 0)
+  const totalCA = tarif * totalQuantite
+  return (
+    <tr>
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:500, whiteSpace:'nowrap', position:'sticky', left:0, background:'#fff', ...COL_LIBELLE }}>{ligne.nom}</td>
+      <td style={{ padding:'2px 3px' }}>
+        <input type="number" step="0.01" value={local.montant_unitaire}
+          onChange={e=>setChamp('montant_unitaire', e.target.value)} onBlur={()=>blurChamp('montant_unitaire')}
+          style={{ width:64, padding:'5px 6px', borderRadius:6, border:'0.5px solid rgba(0,0,0,0.15)', fontSize:12, textAlign:'right' }} />
+      </td>
+      {MOIS_CLES.map(m => (
+        <td key={m} style={{ padding:'2px 3px' }}>
+          <input type="number" step="0.5" value={local[m]}
+            onChange={e=>setChamp(m, e.target.value)} onBlur={()=>blurChamp(m)}
+            style={{ width:56, padding:'5px 6px', borderRadius:6, border:'0.5px solid rgba(0,0,0,0.15)', fontSize:12, textAlign:'right' }} />
+        </td>
+      ))}
+      <td style={{ padding:'6px 8px', fontSize:12, fontWeight:600, textAlign:'right', whiteSpace:'nowrap' }}>{fmtEuros(totalCA)}</td>
+      <td style={{ padding:'6px 4px', whiteSpace:'nowrap' }}>
+        <button onClick={onEdit} title="Modifier le nom / le tarif" style={{ background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:13, marginRight:4 }}>✏️</button>
+        <button onClick={onDelete} style={{ background:'none', border:'none', cursor:'pointer', color:'#ddd', fontSize:13 }}>🗑</button>
+      </td>
+    </tr>
+  )
+}
+
+// Onglet "Autres recettes" : Location de salle, Prestations extérieures et Stages —
+// tarif fixe par ligne, quantité (heures/participants) saisie mois par mois, CA calculé.
+function OngletAutresRecettes({ saison, showToast }) {
+  const { budgetAutresRecettes, sauvegarderAutreRecette, supprimerAutreRecette } = useData()
+  const [modalLigne, setModalLigne] = useState(null) // { section, initial? } | null
+
+  async function handleSave(ligne) {
+    const res = await sauvegarderAutreRecette(ligne)
+    if (res?.error) showToast('Erreur : ' + res.error)
+  }
+  async function handleCreerOuEditer(form) {
+    const { section, initial } = modalLigne
+    const payload = initial ? { ...initial, ...form } : { section, saison, ...form, ...zerosMois() }
+    const res = await sauvegarderAutreRecette(payload)
+    if (res?.error) showToast('Erreur : ' + res.error)
+    setModalLigne(null)
+  }
+  async function handleDelete(ligne) {
+    if (!window.confirm(`Supprimer "${ligne.nom}" ?`)) return
+    const res = await supprimerAutreRecette(ligne.id)
+    if (res?.error) showToast('Erreur : ' + res.error)
+  }
+
+  return (
+    <div>
+      <p style={{ fontSize:13, color:'#888', marginBottom:16 }}>
+        Location de salle, prestations extérieures et stages. Renseigne un tarif fixe par ligne, puis la quantité (heures ou nombre de participants) mois par mois : le CA se calcule automatiquement. Rattache chaque section à un regroupement Indy dans "⚙ Regroupements Indy" pour qu'elle apparaisse dans le budget mensuel.
+      </p>
+      {SECTIONS_AUTRES_RECETTES.map(sec => {
+        const lignes = budgetAutresRecettes.filter(l => l.saison === saison && l.section === sec.key)
+        return (
+          <div key={sec.key} style={{ overflowX:'auto', marginBottom:24 }}>
+            <table style={{ borderCollapse:'collapse', width:'100%', tableLayout:'fixed' }}>
+              <EnteteTableau label={sec.label} libelleTarif={sec.libelleUnitaire} />
+              <tbody>
+                {lignes.map(l => (
+                  <LigneAutreRecette key={l.id} ligne={l} onSave={handleSave} onDelete={()=>handleDelete(l)}
+                    onEdit={()=>setModalLigne({ section: sec.key, initial: l })} />
+                ))}
+              </tbody>
+            </table>
+            {lignes.length === 0 && <p style={{ fontSize:12, color:'#aaa', margin:'4px 0 8px' }}>Aucune ligne.</p>}
+            <button style={{ ...BTN.small, marginTop:8 }} onClick={()=>setModalLigne({ section: sec.key })}>+ Ligne dans "{sec.label}"</button>
+          </div>
+        )
+      })}
+      {modalLigne && (
+        <FormAutreRecette section={modalLigne.section} initial={modalLigne.initial}
+          onClose={()=>setModalLigne(null)} onCree={handleCreerOuEditer} />
+      )}
+    </div>
+  )
+}
+
 function OngletMensuel({ saison, showToast }) {
   const {
-    cours, budgetCoursPrevisionnel, budgetPrevisionnel, budgetReel, budgetRepartition,
+    cours, budgetCoursPrevisionnel, budgetPrevisionnel, budgetReel, budgetRepartition, budgetAutresRecettes,
     regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetAtterrissageLignes, budgetMoisClos, parametres,
     sauvegarderLigneBudgetMensuel, supprimerLigneBudgetMensuel, sauvegarderRepartition,
     sauvegarderIndyTotal, sauvegarderAtterrissage, sauvegarderAtterrissageLigne, toggleMoisClos,
@@ -1443,6 +1598,9 @@ function OngletMensuel({ saison, showToast }) {
   const mappingCategoriesCours = useMemo(() => {
     try { return JSON.parse(parametres.regroupements_indy_categories_cours || '{}') } catch(e) { return {} }
   }, [parametres.regroupements_indy_categories_cours])
+  const mappingAutresRecettes = useMemo(() => {
+    try { return JSON.parse(parametres.regroupements_indy_autres_recettes || '{}') } catch(e) { return {} }
+  }, [parametres.regroupements_indy_autres_recettes])
   const regroupementsRecette = regroupementsIndy.filter(r => r.type === 'recette')
   const regroupementsCharge = regroupementsIndy.filter(r => r.type === 'charge')
   function nomRegroupement(id) { return id ? (regroupementsIndy.find(r => r.id === id)?.nom || 'Non classé') : 'Non classé' }
@@ -1473,6 +1631,16 @@ function OngletMensuel({ saison, showToast }) {
     Danse: MOIS_CLES.map((_,i) => parCategorie.Danse.reduce((s,l) => s + l.valeurs[i], 0)),
   }
 
+  // Autres recettes (Location, Prestations, Stages) : tarif fixe × quantité par mois
+  const totalParSectionAutresRecettesMois = useMemo(() => {
+    const totaux = {}
+    for (const sec of SECTIONS_AUTRES_RECETTES) {
+      const lignes = budgetAutresRecettes.filter(l => l.saison === saison && l.section === sec.key)
+      totaux[sec.key] = MOIS_CLES.map((m,i) => lignes.reduce((s,l) => s + Number(l.montant_unitaire||0) * Number(l[m]||0), 0))
+    }
+    return totaux
+  }, [budgetAutresRecettes, saison])
+
   async function handleSaveRepartition() {
     const res = await sauvegarderRepartition(saison, Object.fromEntries(MOIS_CLES.map(m => [m, Number(repLocal[m])||0])))
     if (res?.error) showToast('Erreur : ' + res.error)
@@ -1498,8 +1666,15 @@ function OngletMensuel({ saison, showToast }) {
     await supprimerLigneBudgetMensuel(table, ligne.id, supprimerMiroir)
   }
 
+  // Sources de recette "virtuelles" (calculées, pas des lignes libres) qui peuvent être
+  // rattachées à un regroupement Indy : catégories de cours + sections autres recettes.
+  const sourcesRecetteVirtuelle = [
+    ...['Gym', 'Danse'].map(cat => ({ cle: 'cours_' + cat, libelle: `${cat} (calculé, voir Recettes par cours)`, regroupementId: mappingCategoriesCours[cat], valeurs: totalParCategorieCoursMois[cat] })),
+    ...SECTIONS_AUTRES_RECETTES.map(sec => ({ cle: 'autre_' + sec.key, libelle: `${sec.label} (calculé, voir Autres recettes)`, regroupementId: mappingAutresRecettes[sec.key], valeurs: totalParSectionAutresRecettesMois[sec.key] })),
+  ]
+
   // Totaux
-  const lignesCoursValeurs = [...parCategorie.Gym, ...parCategorie.Danse].map(l => Object.fromEntries(MOIS_CLES.map((m,i) => [m, l.valeurs[i]])))
+  const lignesCoursValeurs = sourcesRecetteVirtuelle.map(s => Object.fromEntries(MOIS_CLES.map((m,i) => [m, s.valeurs[i]])))
   const totalRecettesMois = vue === 'previsionnel'
     ? totalParMois([...lignesCoursValeurs, ...lignesRecetteLibres])
     : totalParMois(lignesRecetteLibres)
@@ -1509,14 +1684,14 @@ function OngletMensuel({ saison, showToast }) {
   const soldeCumule = soldeMois.map(s => (cumul += s))
 
   // Référence prévisionnelle d'un regroupement (somme des lignes prévisionnelles qui le
-  // portent, + total cours si c'est le regroupement "Cours")
+  // portent, + total cours/autres recettes calculées qui lui sont rattachées)
   function referencePrevisionnelle(regroupementId, type) {
     const lignes = lignesPrevSaison.filter(l => l.type === type && (l.regroupement_id || null) === regroupementId)
     let valeurs = totalParMois(lignes)
     if (type === 'recette' && regroupementId) {
-      for (const cat of ['Gym', 'Danse']) {
-        if (mappingCategoriesCours[cat] === regroupementId) {
-          valeurs = valeurs.map((v,i) => v + totalParCategorieCoursMois[cat][i])
+      for (const source of sourcesRecetteVirtuelle) {
+        if (source.regroupementId === regroupementId) {
+          valeurs = valeurs.map((v,i) => v + source.valeurs[i])
         }
       }
     }
@@ -1541,12 +1716,12 @@ function OngletMensuel({ saison, showToast }) {
       valeursPrev: valeursDeLigne(prev),
       valeursReel: valeursDeLigne(reel),
     }))
-    // Recettes cours (Gym/Danse) mappées sur ce regroupement : injectées côté prévisionnel
-    // uniquement (le réel de ces cours arrive via les lignes réelles saisies séparément).
+    // Recettes cours / autres recettes mappées sur ce regroupement : injectées côté
+    // prévisionnel uniquement (le réel arrive via les lignes réelles saisies séparément).
     if (type === 'recette' && regroupementId) {
-      for (const cat of ['Gym', 'Danse']) {
-        if (mappingCategoriesCours[cat] === regroupementId) {
-          paires.push({ key: 'cours_' + cat, libelle: `${cat} (calculé, voir Recettes par cours)`, valeursPrev: totalParCategorieCoursMois[cat], valeursReel: MOIS_CLES.map(()=>0) })
+      for (const source of sourcesRecetteVirtuelle) {
+        if (source.regroupementId === regroupementId) {
+          paires.push({ key: source.cle, libelle: source.libelle, valeursPrev: source.valeurs, valeursReel: MOIS_CLES.map(()=>0) })
         }
       }
     }
@@ -1711,7 +1886,7 @@ function OngletMensuel({ saison, showToast }) {
               {(vue === 'previsionnel' || vue === 'reel') && regroupementsRecette.map(r => (
                 <BlocRegroupementReel key={r.id} regroupement={r} nom={r.nom} avecIndy={vue === 'reel'}
                   lignes={vue === 'reel' ? lignesReelDuRegroupement(r.id, 'recette') : lignesRecetteLibres.filter(l => (l.regroupement_id||null) === r.id)}
-                  lignesCoursVirtuelles={vue === 'previsionnel' ? ['Gym','Danse'].filter(cat => mappingCategoriesCours[cat] === r.id).map(cat => ({ nom: cat, valeurs: totalParCategorieCoursMois[cat] })) : []}
+                  lignesCoursVirtuelles={vue === 'previsionnel' ? sourcesRecetteVirtuelle.filter(s => s.regroupementId === r.id).map(s => ({ nom: s.libelle, valeurs: s.valeurs })) : []}
                   indyRow={vue === 'reel' ? budgetIndyTotaux.find(t => t.regroupement_id === r.id && t.saison === saison) : null}
                   ouvert={!!ouvertes['r_'+r.id]} onToggle={()=>setOuvertes(o=>({...o, ['r_'+r.id]: !o['r_'+r.id]}))}
                   onSaveIndy={(champ)=>handleSaveIndyTotal(r.id, champ)}
@@ -1936,11 +2111,13 @@ export default function Budget() {
         <button onClick={()=>setOnglet('calendrier')} style={{ ...BTN.ghost, ...(onglet==='calendrier' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Calendrier annuel</button>
         <button onClick={()=>setOnglet('tarifs')} style={{ ...BTN.ghost, ...(onglet==='tarifs' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Tarifs</button>
         <button onClick={()=>setOnglet('recettes')} style={{ ...BTN.ghost, ...(onglet==='recettes' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Recettes par cours</button>
+        <button onClick={()=>setOnglet('autresRecettes')} style={{ ...BTN.ghost, ...(onglet==='autresRecettes' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Autres recettes</button>
         <button onClick={()=>setOnglet('mensuel')} style={{ ...BTN.ghost, ...(onglet==='mensuel' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Mensuel</button>
         <button onClick={()=>setOnglet('graphique')} style={{ ...BTN.ghost, ...(onglet==='graphique' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Graphique</button>
       </div>
 
       {onglet === 'recettes' && <OngletRecettes saison={saison} showToast={showToast} />}
+      {onglet === 'autresRecettes' && <OngletAutresRecettes saison={saison} showToast={showToast} />}
       {onglet === 'tarifs' && <OngletTarifs saison={saison} showToast={showToast} />}
       {onglet === 'calendrier' && <OngletCalendrier saison={saison} showToast={showToast} />}
       {onglet === 'mensuel' && <OngletMensuel saison={saison} showToast={showToast} />}
