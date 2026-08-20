@@ -54,6 +54,7 @@ export function DataProvider({ children }) {
   const [budgetAtterrissage, setBudgetAtterrissage] = useState([])
   const [budgetAtterrissageLignes, setBudgetAtterrissageLignes] = useState([])
   const [budgetMoisClos, setBudgetMoisClos] = useState([])
+  const [comptesIndyMapping, setComptesIndyMapping] = useState([])
   const [parametres, setParametres] = useState({})
   const [loading, setLoading] = useState(true)
   const [online, setOnline] = useState(navigator.onLine)
@@ -90,6 +91,7 @@ export function DataProvider({ children }) {
         setBudgetAtterrissage(cached.budgetAtterrissage || [])
         setBudgetAtterrissageLignes(cached.budgetAtterrissageLignes || [])
         setBudgetMoisClos(cached.budgetMoisClos || [])
+        setComptesIndyMapping(cached.comptesIndyMapping || [])
       }
       setLoading(false)
       return
@@ -100,7 +102,7 @@ export function DataProvider({ children }) {
         { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }, { data: bc }, { data: sc }, { data: je },
         { data: st }, { data: sg }, { data: si }, { data: sp },
         { data: bp }, { data: br }, { data: brp },
-        { data: ri }, { data: bit }, { data: bat }, { data: bal }, { data: bmc }
+        { data: ri }, { data: bit }, { data: bat }, { data: bal }, { data: bmc }, { data: cim }
       ] = await Promise.all([
         supabase.from('cours').select('*').order('jour').order('heure'),
         supabase.from('membres').select('*').order('nom'),
@@ -126,10 +128,11 @@ export function DataProvider({ children }) {
         supabase.from('budget_atterrissage').select('*'),
         supabase.from('budget_atterrissage_lignes').select('*'),
         supabase.from('budget_mois_clos').select('*'),
+        supabase.from('comptes_indy_mapping').select('*'),
       ])
 
       const paramsObj = Object.fromEntries((p||[]).map(x => [x.cle, x.valeur]))
-      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[], budgetPrevisionnel: bp||[], budgetReel: br||[], budgetRepartition: brp||[], regroupementsIndy: ri||[], budgetIndyTotaux: bit||[], budgetAtterrissage: bat||[], budgetAtterrissageLignes: bal||[], budgetMoisClos: bmc||[] }
+      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[], budgetPrevisionnel: bp||[], budgetReel: br||[], budgetRepartition: brp||[], regroupementsIndy: ri||[], budgetIndyTotaux: bit||[], budgetAtterrissage: bat||[], budgetAtterrissageLignes: bal||[], budgetMoisClos: bmc||[], comptesIndyMapping: cim||[] }
       setCours(data.cours)
       setMembres(data.membres)
       setInscriptions(data.inscriptions)
@@ -154,6 +157,7 @@ export function DataProvider({ children }) {
       setBudgetAtterrissage(data.budgetAtterrissage)
       setBudgetAtterrissageLignes(data.budgetAtterrissageLignes)
       setBudgetMoisClos(data.budgetMoisClos)
+      setComptesIndyMapping(data.comptesIndyMapping)
       saveCache(data)
     } catch(e) {
       console.error('loadAll error:', e)
@@ -184,6 +188,7 @@ export function DataProvider({ children }) {
         setBudgetAtterrissage(cached.budgetAtterrissage || [])
         setBudgetAtterrissageLignes(cached.budgetAtterrissageLignes || [])
         setBudgetMoisClos(cached.budgetMoisClos || [])
+        setComptesIndyMapping(cached.comptesIndyMapping || [])
       }
     }
     setLoading(false)
@@ -260,6 +265,7 @@ export function DataProvider({ children }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_atterrissage' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_atterrissage_lignes' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_mois_clos' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comptes_indy_mapping' }, loadAll)
       .subscribe()
 
     return () => { if (realtimeSub.current) supabase.removeChannel(realtimeSub.current) }
@@ -1001,6 +1007,113 @@ export function DataProvider({ children }) {
     }
   }
 
+  // ─── MAPPING COMPTES INDY (FEC) ────────────────────────────────
+  async function sauvegarderCompteMapping(compte, libelle, regroupementId) {
+    const data = { compte, libelle, regroupement_id: regroupementId }
+    setComptesIndyMapping(prev => {
+      const idx = prev.findIndex(c => c.compte === compte)
+      if (idx >= 0) { const n = [...prev]; n[idx] = { ...n[idx], ...data }; return n }
+      return [...prev, data]
+    })
+    if (!navigator.onLine) { enqueue({ action: 'upsert', table: 'comptes_indy_mapping', payload: data }); return { offline: true } }
+    try {
+      const { error } = await supabase.from('comptes_indy_mapping').upsert(data, { onConflict: 'compte' })
+      if (error) throw error
+      return { success: true }
+    } catch(e) {
+      enqueue({ action: 'upsert', table: 'comptes_indy_mapping', payload: data })
+      return { queued: true }
+    }
+  }
+
+  // Convertit une date en (saison, mois-clé) selon le calendrier budgétaire août → juillet.
+  function saisonEtMoisBudget(dateStr) {
+    const [j, mo, an] = dateStr.split('/').map(Number)
+    const year = an, month = mo
+    if (month >= 8) return { saison: `${year}-${year+1}`, mois: MOIS_CLES_BUDGET[month - 8] }
+    return { saison: `${year-1}-${year}`, mois: MOIS_CLES_BUDGET[month + 4] }
+  }
+
+  // Parse et importe un export FEC (Date;Libelle;Compte;Libelle du compte;Debit;Credit).
+  // Ne retient que les comptes de charges (classe 6) et de produits (classe 7) — banque,
+  // TVA, associés... sont ignorés. Un compte encore inconnu se voit automatiquement
+  // rattaché à un regroupement Indy portant le nom du compte (un regroupement existant
+  // ou déjà créé pendant cet import est réutilisé s'il porte le même nom et le même type).
+  // Écrase ensuite le "Total Indy" des mois/saisons concernés.
+  async function importerFEC(texteCsv) {
+    const lignes = texteCsv.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+    if (lignes.length < 2) return { error: 'Fichier vide ou invalide' }
+    const parNum = (s) => parseFloat((s||'0').replace(/\s/g,'').replace(',', '.')) || 0
+
+    const parCompte = new Map() // compte -> { libelle, type, parSaisonMois: {saison: {mois: montant}} }
+    for (let idx = 1; idx < lignes.length; idx++) {
+      const cols = lignes[idx].split(';')
+      if (cols.length < 6) continue
+      const [date, , compte, libelleCompte, debitStr, creditStr] = cols
+      const classe = compte[0]
+      if (classe !== '6' && classe !== '7') continue
+      const debit = parNum(debitStr), credit = parNum(creditStr)
+      const montant = classe === '6' ? (debit - credit) : (credit - debit)
+      const { saison, mois } = saisonEtMoisBudget(date)
+      if (!parCompte.has(compte)) parCompte.set(compte, { libelle: libelleCompte, type: classe === '6' ? 'charge' : 'recette', parSaisonMois: {} })
+      const entree = parCompte.get(compte)
+      if (!entree.parSaisonMois[saison]) entree.parSaisonMois[saison] = {}
+      entree.parSaisonMois[saison][mois] = (entree.parSaisonMois[saison][mois] || 0) + montant
+    }
+
+    // Résout le regroupement de chaque compte : mapping existant, sinon regroupement
+    // auto-créé (un par libellé de compte distinct, réutilisé au sein du même import).
+    const regroupementsCrees = []
+    const regroupementParLibelle = new Map()
+    const regroupementIdDuCompte = new Map()
+    for (const [compte, v] of parCompte.entries()) {
+      const mapping = comptesIndyMapping.find(m => m.compte === compte)
+      if (mapping?.regroupement_id) { regroupementIdDuCompte.set(compte, mapping.regroupement_id); continue }
+      const cleLibelle = v.type + '|' + v.libelle
+      let regroupementId = regroupementParLibelle.get(cleLibelle)
+      if (!regroupementId) {
+        const existant = regroupementsIndy.find(r => r.type === v.type && r.nom === v.libelle)
+        if (existant) {
+          regroupementId = existant.id
+        } else {
+          regroupementId = 'ri' + Date.now().toString(36) + Math.random().toString(36).slice(2,7)
+          const data = { id: regroupementId, nom: v.libelle, type: v.type }
+          await upsert('regroupements_indy', data, () => setRegroupementsIndy(prev => [...prev, data]))
+          regroupementsCrees.push({ compte, nom: v.libelle, type: v.type })
+        }
+        regroupementParLibelle.set(cleLibelle, regroupementId)
+      }
+      regroupementIdDuCompte.set(compte, regroupementId)
+      await sauvegarderCompteMapping(compte, v.libelle, regroupementId)
+    }
+
+    // Agrège les montants par saison / regroupement / mois avec les regroupements résolus.
+    const parSaisonRegroupement = {}
+    for (const [compte, v] of parCompte.entries()) {
+      const regroupementId = regroupementIdDuCompte.get(compte)
+      if (!regroupementId) continue
+      for (const [saison, moisMontants] of Object.entries(v.parSaisonMois)) {
+        if (!parSaisonRegroupement[saison]) parSaisonRegroupement[saison] = {}
+        if (!parSaisonRegroupement[saison][regroupementId]) parSaisonRegroupement[saison][regroupementId] = {}
+        for (const [mois, montant] of Object.entries(moisMontants)) {
+          parSaisonRegroupement[saison][regroupementId][mois] = (parSaisonRegroupement[saison][regroupementId][mois] || 0) + montant
+        }
+      }
+    }
+
+    let nbEcritures = 0
+    for (const [saison, parRegroupement] of Object.entries(parSaisonRegroupement)) {
+      for (const [regroupementId, moisMontants] of Object.entries(parRegroupement)) {
+        const arrondis = Object.fromEntries(Object.entries(moisMontants).map(([m, v]) => [m, Math.round(v * 100) / 100]))
+        const res = await sauvegarderIndyTotal(regroupementId, saison, arrondis)
+        if (res?.error) return { error: res.error }
+        nbEcritures++
+      }
+    }
+
+    return { success: true, nbEcritures, regroupementsCrees }
+  }
+
   // Import en masse (ex: SportEasy) — ne crée que ce qui n'existe pas déjà
   async function importerLot({ cours: nCours = [], membres: nMembres = [], inscriptions: nInscriptions = [], reglements: nReglements = [] }) {
     const coursIds = new Set(cours.map(c => c.id))
@@ -1255,7 +1368,7 @@ export function DataProvider({ children }) {
     budgetCoursPrevisionnel, saisonsCalendrier, joursExceptionnels,
     stages, stagiaires, stageInscriptions, stagePresences,
     budgetPrevisionnel, budgetReel, budgetRepartition,
-    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetAtterrissageLignes, budgetMoisClos,
+    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetAtterrissageLignes, budgetMoisClos, comptesIndyMapping,
     loading, online, syncing, queueSize,
     // Actions
     loadAll,
@@ -1275,6 +1388,7 @@ export function DataProvider({ children }) {
     sauvegarderStage, archiverStage, sauvegarderStagiaire, inscrireStagiaire, desinscrireStagiaire, sauvegarderPresenceStage,
     sauvegarderLigneBudgetMensuel, supprimerLigneBudgetMensuel, sauvegarderRepartition,
     sauvegarderRegroupement, supprimerRegroupement, sauvegarderIndyTotal, sauvegarderAtterrissage, sauvegarderAtterrissageLigne, toggleMoisClos,
+    sauvegarderCompteMapping, importerFEC,
     definirParametre,
     importerLot,
     mettreAJourMembres,
