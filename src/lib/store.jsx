@@ -49,6 +49,10 @@ export function DataProvider({ children }) {
   const [budgetPrevisionnel, setBudgetPrevisionnel] = useState([])
   const [budgetReel, setBudgetReel] = useState([])
   const [budgetRepartition, setBudgetRepartition] = useState([])
+  const [regroupementsIndy, setRegroupementsIndy] = useState([])
+  const [budgetIndyTotaux, setBudgetIndyTotaux] = useState([])
+  const [budgetAtterrissage, setBudgetAtterrissage] = useState([])
+  const [budgetMoisClos, setBudgetMoisClos] = useState([])
   const [parametres, setParametres] = useState({})
   const [loading, setLoading] = useState(true)
   const [online, setOnline] = useState(navigator.onLine)
@@ -80,6 +84,10 @@ export function DataProvider({ children }) {
         setBudgetPrevisionnel(cached.budgetPrevisionnel || [])
         setBudgetReel(cached.budgetReel || [])
         setBudgetRepartition(cached.budgetRepartition || [])
+        setRegroupementsIndy(cached.regroupementsIndy || [])
+        setBudgetIndyTotaux(cached.budgetIndyTotaux || [])
+        setBudgetAtterrissage(cached.budgetAtterrissage || [])
+        setBudgetMoisClos(cached.budgetMoisClos || [])
       }
       setLoading(false)
       return
@@ -89,7 +97,8 @@ export function DataProvider({ children }) {
       const [
         { data: c }, { data: m }, { data: i }, { data: h }, { data: a }, { data: r }, { data: t }, { data: p }, { data: rm }, { data: bc }, { data: sc }, { data: je },
         { data: st }, { data: sg }, { data: si }, { data: sp },
-        { data: bp }, { data: br }, { data: brp }
+        { data: bp }, { data: br }, { data: brp },
+        { data: ri }, { data: bit }, { data: bat }, { data: bmc }
       ] = await Promise.all([
         supabase.from('cours').select('*').order('jour').order('heure'),
         supabase.from('membres').select('*').order('nom'),
@@ -110,10 +119,14 @@ export function DataProvider({ children }) {
         supabase.from('budget_previsionnel').select('*'),
         supabase.from('budget_reel').select('*'),
         supabase.from('budget_repartition_mensuelle').select('*'),
+        supabase.from('regroupements_indy').select('*'),
+        supabase.from('budget_indy_totaux').select('*'),
+        supabase.from('budget_atterrissage').select('*'),
+        supabase.from('budget_mois_clos').select('*'),
       ])
 
       const paramsObj = Object.fromEntries((p||[]).map(x => [x.cle, x.valeur]))
-      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[], budgetPrevisionnel: bp||[], budgetReel: br||[], budgetRepartition: brp||[] }
+      const data = { cours: c||[], membres: m||[], inscriptions: i||[], historique: h||[], abonnements: a||[], reglements: r||[], tarifs: t||[], parametres: paramsObj, remises: rm||[], budgetCoursPrevisionnel: bc||[], saisonsCalendrier: sc||[], joursExceptionnels: je||[], stages: st||[], stagiaires: sg||[], stageInscriptions: si||[], stagePresences: sp||[], budgetPrevisionnel: bp||[], budgetReel: br||[], budgetRepartition: brp||[], regroupementsIndy: ri||[], budgetIndyTotaux: bit||[], budgetAtterrissage: bat||[], budgetMoisClos: bmc||[] }
       setCours(data.cours)
       setMembres(data.membres)
       setInscriptions(data.inscriptions)
@@ -133,6 +146,10 @@ export function DataProvider({ children }) {
       setBudgetPrevisionnel(data.budgetPrevisionnel)
       setBudgetReel(data.budgetReel)
       setBudgetRepartition(data.budgetRepartition)
+      setRegroupementsIndy(data.regroupementsIndy)
+      setBudgetIndyTotaux(data.budgetIndyTotaux)
+      setBudgetAtterrissage(data.budgetAtterrissage)
+      setBudgetMoisClos(data.budgetMoisClos)
       saveCache(data)
     } catch(e) {
       console.error('loadAll error:', e)
@@ -158,6 +175,10 @@ export function DataProvider({ children }) {
         setBudgetPrevisionnel(cached.budgetPrevisionnel || [])
         setBudgetReel(cached.budgetReel || [])
         setBudgetRepartition(cached.budgetRepartition || [])
+        setRegroupementsIndy(cached.regroupementsIndy || [])
+        setBudgetIndyTotaux(cached.budgetIndyTotaux || [])
+        setBudgetAtterrissage(cached.budgetAtterrissage || [])
+        setBudgetMoisClos(cached.budgetMoisClos || [])
       }
     }
     setLoading(false)
@@ -229,6 +250,10 @@ export function DataProvider({ children }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_previsionnel' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_reel' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_repartition_mensuelle' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'regroupements_indy' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_indy_totaux' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_atterrissage' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_mois_clos' }, loadAll)
       .subscribe()
 
     return () => { if (realtimeSub.current) supabase.removeChannel(realtimeSub.current) }
@@ -833,6 +858,87 @@ export function DataProvider({ children }) {
     }
   }
 
+  // ─── REGROUPEMENTS INDY (paramétrage) ─────────────────────────
+  async function sauvegarderRegroupement(payload) {
+    const isNew = !payload.id
+    const id = payload.id || ('ri' + Date.now().toString(36))
+    const data = { ...payload, id }
+    if (isNew) return insert('regroupements_indy', data, () => setRegroupementsIndy(prev => [...prev, data]))
+    return upsert('regroupements_indy', data, () => setRegroupementsIndy(prev => prev.map(r => r.id === data.id ? { ...r, ...data } : r)))
+  }
+
+  async function supprimerRegroupement(id) {
+    if (!navigator.onLine) return { offline: true }
+    try {
+      const { error } = await supabase.from('regroupements_indy').delete().eq('id', id)
+      if (error) throw error
+      setRegroupementsIndy(prev => prev.filter(r => r.id !== id))
+      return { success: true }
+    } catch(e) {
+      return { error: e.message || 'Erreur lors de la suppression' }
+    }
+  }
+
+  // ─── TOTAUX RÉELS INDY (contrôle, par regroupement + saison) ──
+  async function sauvegarderIndyTotal(regroupementId, saison, valeurs) {
+    const existant = budgetIndyTotaux.find(t => t.regroupement_id === regroupementId && t.saison === saison)
+    const data = { ...(existant || {}), regroupement_id: regroupementId, saison, ...valeurs }
+    setBudgetIndyTotaux(prev => {
+      const idx = prev.findIndex(t => t.regroupement_id === regroupementId && t.saison === saison)
+      if (idx >= 0) { const n = [...prev]; n[idx] = data; return n }
+      return [...prev, data]
+    })
+    if (!navigator.onLine) { enqueue({ action: 'upsert', table: 'budget_indy_totaux', payload: data }); return { offline: true } }
+    try {
+      const { error } = await supabase.from('budget_indy_totaux').upsert(data, { onConflict: 'regroupement_id,saison' })
+      if (error) throw error
+      return { success: true }
+    } catch(e) {
+      enqueue({ action: 'upsert', table: 'budget_indy_totaux', payload: data })
+      return { queued: true }
+    }
+  }
+
+  // ─── ATTERRISSAGE (ajustements manuels sur les mois ouverts) ──
+  async function sauvegarderAtterrissage(regroupementId, saison, valeurs) {
+    const existant = budgetAtterrissage.find(a => a.regroupement_id === regroupementId && a.saison === saison)
+    const data = { ...(existant || {}), regroupement_id: regroupementId, saison, ...valeurs }
+    setBudgetAtterrissage(prev => {
+      const idx = prev.findIndex(a => a.regroupement_id === regroupementId && a.saison === saison)
+      if (idx >= 0) { const n = [...prev]; n[idx] = data; return n }
+      return [...prev, data]
+    })
+    if (!navigator.onLine) { enqueue({ action: 'upsert', table: 'budget_atterrissage', payload: data }); return { offline: true } }
+    try {
+      const { error } = await supabase.from('budget_atterrissage').upsert(data, { onConflict: 'regroupement_id,saison' })
+      if (error) throw error
+      return { success: true }
+    } catch(e) {
+      enqueue({ action: 'upsert', table: 'budget_atterrissage', payload: data })
+      return { queued: true }
+    }
+  }
+
+  // ─── CLÔTURE MENSUELLE (par saison, un mois clôture tous les regroupements) ──
+  async function toggleMoisClos(saison, mois, clos) {
+    const existant = budgetMoisClos.find(m => m.saison === saison)
+    const data = { ...(existant || {}), saison, [mois]: clos }
+    setBudgetMoisClos(prev => {
+      const idx = prev.findIndex(m => m.saison === saison)
+      if (idx >= 0) { const n = [...prev]; n[idx] = data; return n }
+      return [...prev, data]
+    })
+    if (!navigator.onLine) { enqueue({ action: 'upsert', table: 'budget_mois_clos', payload: data }); return { offline: true } }
+    try {
+      const { error } = await supabase.from('budget_mois_clos').upsert(data, { onConflict: 'saison' })
+      if (error) throw error
+      return { success: true }
+    } catch(e) {
+      enqueue({ action: 'upsert', table: 'budget_mois_clos', payload: data })
+      return { queued: true }
+    }
+  }
+
   // Import en masse (ex: SportEasy) — ne crée que ce qui n'existe pas déjà
   async function importerLot({ cours: nCours = [], membres: nMembres = [], inscriptions: nInscriptions = [], reglements: nReglements = [] }) {
     const coursIds = new Set(cours.map(c => c.id))
@@ -1087,6 +1193,7 @@ export function DataProvider({ children }) {
     budgetCoursPrevisionnel, saisonsCalendrier, joursExceptionnels,
     stages, stagiaires, stageInscriptions, stagePresences,
     budgetPrevisionnel, budgetReel, budgetRepartition,
+    regroupementsIndy, budgetIndyTotaux, budgetAtterrissage, budgetMoisClos,
     loading, online, syncing, queueSize,
     // Actions
     loadAll,
@@ -1105,6 +1212,8 @@ export function DataProvider({ children }) {
     sauvegarderSaisonCalendrier, sauvegarderJourExceptionnel, supprimerJourExceptionnel,
     sauvegarderStage, archiverStage, sauvegarderStagiaire, inscrireStagiaire, desinscrireStagiaire, sauvegarderPresenceStage,
     sauvegarderLigneBudgetMensuel, supprimerLigneBudgetMensuel, sauvegarderRepartition,
+    sauvegarderRegroupement, supprimerRegroupement, sauvegarderIndyTotal, sauvegarderAtterrissage, toggleMoisClos,
+    definirParametre,
     importerLot,
     mettreAJourMembres,
     mettreAJourMembresLot,
