@@ -793,7 +793,9 @@ function LigneEcart({ valeurs }) {
 }
 
 // Bloc d'un regroupement dans la vue Réel : sous-total, total Indy, écart, détail des lignes
-function BlocRegroupementReel({ regroupement, nom, lignes, indyRow, ouvert, onToggle, onSaveIndy, onSaveLigne, onDeleteLigne, onAjouterLigne }) {
+// avecIndy=true (vue Réel) : affiche en plus le total de contrôle Indy et l'écart.
+// avecIndy=false (vue Prévisionnel) : juste le sous-total du regroupement + détail.
+function BlocRegroupementReel({ regroupement, nom, lignes, indyRow, avecIndy, ouvert, onToggle, onSaveIndy, onSaveLigne, onDeleteLigne, onAjouterLigne }) {
   const sousTotal = totalParMois(lignes)
   const indyValeurs = MOIS_CLES.map(m => Number(indyRow?.[m] || 0))
   const ecart = sousTotal.map((v,i) => indyValeurs[i] - v)
@@ -809,8 +811,8 @@ function BlocRegroupementReel({ regroupement, nom, lignes, indyRow, ouvert, onTo
       </tr>
       {ouvert && (
         <>
-          <LigneIndyTotal valeurs={indyRow || {}} onSave={onSaveIndy} />
-          <LigneEcart valeurs={ecart} />
+          {avecIndy && <LigneIndyTotal valeurs={indyRow || {}} onSave={onSaveIndy} />}
+          {avecIndy && <LigneEcart valeurs={ecart} />}
           {lignes.map(l => (
             <LigneMensuelle key={l.id} ligne={l} onSave={onSaveLigne} onDelete={()=>onDeleteLigne(l)} />
           ))}
@@ -1189,20 +1191,17 @@ function OngletMensuel({ saison, showToast }) {
                   </Fragment>
                 )
               })}
-              {vue === 'previsionnel' && lignesRecetteLibres.map(l => (
-                <LigneMensuelle key={l.id} ligne={l} nomRegroupement={nomRegroupement(l.regroupement_id)} onSave={handleSaveLigne} onDelete={()=>handleDeleteLigne(l)} />
-              ))}
-              {vue === 'reel' && regroupementsRecette.map(r => (
-                <BlocRegroupementReel key={r.id} regroupement={r} nom={r.nom}
-                  lignes={lignesReelDuRegroupement(r.id, 'recette')}
-                  indyRow={budgetIndyTotaux.find(t => t.regroupement_id === r.id && t.saison === saison)}
+              {(vue === 'previsionnel' || vue === 'reel') && regroupementsRecette.map(r => (
+                <BlocRegroupementReel key={r.id} regroupement={r} nom={r.nom} avecIndy={vue === 'reel'}
+                  lignes={vue === 'reel' ? lignesReelDuRegroupement(r.id, 'recette') : lignesRecetteLibres.filter(l => (l.regroupement_id||null) === r.id)}
+                  indyRow={vue === 'reel' ? budgetIndyTotaux.find(t => t.regroupement_id === r.id && t.saison === saison) : null}
                   ouvert={!!ouvertes['r_'+r.id]} onToggle={()=>setOuvertes(o=>({...o, ['r_'+r.id]: !o['r_'+r.id]}))}
                   onSaveIndy={(champ)=>handleSaveIndyTotal(r.id, champ)}
                   onSaveLigne={handleSaveLigne} onDeleteLigne={handleDeleteLigne}
                   onAjouterLigne={(reg)=>setModalLigne({ type:'recette', regroupementId: reg.id })} />
               ))}
-              {vue === 'reel' && lignesRecetteLibres.filter(l => !l.regroupement_id).length > 0 && (
-                <BlocRegroupementReel regroupement={null} nom="Non classé"
+              {lignesRecetteLibres.filter(l => !l.regroupement_id).length > 0 && (
+                <BlocRegroupementReel regroupement={null} nom="Non classé" avecIndy={false}
                   lignes={lignesRecetteLibres.filter(l => !l.regroupement_id)}
                   indyRow={null}
                   ouvert={!!ouvertes['r_nonclasse']} onToggle={()=>setOuvertes(o=>({...o, r_nonclasse: !o.r_nonclasse}))}
@@ -1224,20 +1223,17 @@ function OngletMensuel({ saison, showToast }) {
           <table style={{ borderCollapse:'collapse', width:'100%' }}>
             <EnteteTableau label="Charges" />
             <tbody>
-              {vue === 'previsionnel' && lignesCharges.map(l => (
-                <LigneMensuelle key={l.id} ligne={l} nomRegroupement={nomRegroupement(l.regroupement_id)} onSave={handleSaveLigne} onDelete={()=>handleDeleteLigne(l)} />
-              ))}
-              {vue === 'reel' && regroupementsCharge.map(r => (
-                <BlocRegroupementReel key={r.id} regroupement={r} nom={r.nom}
-                  lignes={lignesReelDuRegroupement(r.id, 'charge')}
-                  indyRow={budgetIndyTotaux.find(t => t.regroupement_id === r.id && t.saison === saison)}
+              {(vue === 'previsionnel' || vue === 'reel') && regroupementsCharge.map(r => (
+                <BlocRegroupementReel key={r.id} regroupement={r} nom={r.nom} avecIndy={vue === 'reel'}
+                  lignes={vue === 'reel' ? lignesReelDuRegroupement(r.id, 'charge') : lignesCharges.filter(l => (l.regroupement_id||null) === r.id)}
+                  indyRow={vue === 'reel' ? budgetIndyTotaux.find(t => t.regroupement_id === r.id && t.saison === saison) : null}
                   ouvert={!!ouvertes['c_'+r.id]} onToggle={()=>setOuvertes(o=>({...o, ['c_'+r.id]: !o['c_'+r.id]}))}
                   onSaveIndy={(champ)=>handleSaveIndyTotal(r.id, champ)}
                   onSaveLigne={handleSaveLigne} onDeleteLigne={handleDeleteLigne}
                   onAjouterLigne={(reg)=>setModalLigne({ type:'charge', regroupementId: reg.id })} />
               ))}
-              {vue === 'reel' && lignesCharges.filter(l => !l.regroupement_id).length > 0 && (
-                <BlocRegroupementReel regroupement={null} nom="Non classé"
+              {lignesCharges.filter(l => !l.regroupement_id).length > 0 && (
+                <BlocRegroupementReel regroupement={null} nom="Non classé" avecIndy={false}
                   lignes={lignesCharges.filter(l => !l.regroupement_id)}
                   indyRow={null}
                   ouvert={!!ouvertes['c_nonclasse']} onToggle={()=>setOuvertes(o=>({...o, c_nonclasse: !o.c_nonclasse}))}
