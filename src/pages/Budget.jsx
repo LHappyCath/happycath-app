@@ -756,15 +756,15 @@ function calculerEvolutionBudget(saison, ctx) {
     for (const l of reelLignes) { const cle = l.lien || ('r_' + l.id); if (!parCle.has(cle)) parCle.set(cle, {}); parCle.get(cle).reel = l }
     const paires = [...parCle.entries()].map(([, { prev, reel }]) => ({ valeursPrev: valeursDeLigne(prev), valeursReel: valeursDeLigne(reel), cle: prev?.lien || reel?.lien || prev?.id || reel?.id }))
     if (type === 'recette' && regroupementId) {
-      for (const cat of ['Gym', 'Danse']) {
-        if (mappingCategoriesCours[cat] === regroupementId) {
-          paires.push({ valeursPrev: totalParCategorieCoursMois[cat], valeursReel: MOIS_CLES.map(()=>0), cle: 'cours_' + cat })
-        }
-      }
-      for (const sec of SECTIONS_AUTRES_RECETTES) {
-        if (mappingAutresRecettes[sec.key] === regroupementId) {
-          paires.push({ valeursPrev: totalParSectionAutresRecettesMois[sec.key], valeursReel: MOIS_CLES.map(()=>0), cle: 'autre_' + sec.key })
-        }
+      const sources = [
+        ...['Gym', 'Danse'].map(cat => ({ cle: 'cours_' + cat, mappe: mappingCategoriesCours[cat], valeurs: totalParCategorieCoursMois[cat] })),
+        ...SECTIONS_AUTRES_RECETTES.map(sec => ({ cle: 'autre_' + sec.key, mappe: mappingAutresRecettes[sec.key], valeurs: totalParSectionAutresRecettesMois[sec.key] })),
+      ]
+      for (const source of sources) {
+        if (source.mappe !== regroupementId) continue
+        const existante = paires.find(p => p.cle === source.cle)
+        if (existante) existante.valeursPrev = source.valeurs
+        else paires.push({ valeursPrev: source.valeurs, valeursReel: MOIS_CLES.map(()=>0), cle: source.cle })
       }
     }
     return paires
@@ -1669,9 +1669,28 @@ function OngletMensuel({ saison, showToast }) {
   // Sources de recette "virtuelles" (calculées, pas des lignes libres) qui peuvent être
   // rattachées à un regroupement Indy : catégories de cours + sections autres recettes.
   const sourcesRecetteVirtuelle = [
-    ...['Gym', 'Danse'].map(cat => ({ cle: 'cours_' + cat, libelle: `${cat} (calculé, voir Recettes par cours)`, regroupementId: mappingCategoriesCours[cat], valeurs: totalParCategorieCoursMois[cat] })),
-    ...SECTIONS_AUTRES_RECETTES.map(sec => ({ cle: 'autre_' + sec.key, libelle: `${sec.label} (calculé, voir Autres recettes)`, regroupementId: mappingAutresRecettes[sec.key], valeurs: totalParSectionAutresRecettesMois[sec.key] })),
+    ...['Gym', 'Danse'].map(cat => ({ cle: 'cours_' + cat, libelle: cat, regroupementId: mappingCategoriesCours[cat], valeurs: totalParCategorieCoursMois[cat] })),
+    ...SECTIONS_AUTRES_RECETTES.map(sec => ({ cle: 'autre_' + sec.key, libelle: sec.label, regroupementId: mappingAutresRecettes[sec.key], valeurs: totalParSectionAutresRecettesMois[sec.key] })),
   ]
+
+  // Matérialise, dès qu'une source calculée est rattachée à un regroupement, une vraie
+  // ligne miroir dans Réel (à 0€, comme pour les lignes libres) — pour que tu puisses la
+  // remplir directement, sans ligne prévisionnelle "manuelle" en double (son prévisionnel
+  // est déjà calculé automatiquement, voir Recettes par cours / Autres recettes).
+  const depSourcesMappees = sourcesRecetteVirtuelle.filter(s => s.regroupementId).map(s => s.cle + ':' + s.regroupementId).join(',')
+  useEffect(() => {
+    async function synchroniserLignesMiroirVirtuelles() {
+      for (const source of sourcesRecetteVirtuelle) {
+        if (!source.regroupementId) continue
+        const dejaPresente = lignesReelSaison.some(l => l.type === 'recette' && l.lien === source.cle)
+        if (dejaPresente) continue
+        await sauvegarderLigneBudgetMensuel('budget_reel', {
+          type: 'recette', saison, libelle: source.libelle, regroupement_id: source.regroupementId, lien: source.cle, ...zerosMois(),
+        }, { sansMiroir: true })
+      }
+    }
+    synchroniserLignesMiroirVirtuelles()
+  }, [depSourcesMappees, saison])
 
   // Totaux
   const lignesCoursValeurs = sourcesRecetteVirtuelle.map(s => Object.fromEntries(MOIS_CLES.map((m,i) => [m, s.valeurs[i]])))
@@ -1716,11 +1735,17 @@ function OngletMensuel({ saison, showToast }) {
       valeursPrev: valeursDeLigne(prev),
       valeursReel: valeursDeLigne(reel),
     }))
-    // Recettes cours / autres recettes mappées sur ce regroupement : injectées côté
-    // prévisionnel uniquement (le réel arrive via les lignes réelles saisies séparément).
+    // Recettes cours / autres recettes mappées sur ce regroupement : le prévisionnel est
+    // calculé (pas une ligne manuelle) ; le réel vient de sa ligne miroir (même clé "lien"),
+    // déjà présente ci-dessus si elle existe — sinon on l'ajoute avec un réel à 0.
     if (type === 'recette' && regroupementId) {
       for (const source of sourcesRecetteVirtuelle) {
-        if (source.regroupementId === regroupementId) {
+        if (source.regroupementId !== regroupementId) continue
+        const existante = paires.find(p => p.key === source.cle)
+        if (existante) {
+          existante.valeursPrev = source.valeurs
+          existante.libelle = source.libelle
+        } else {
           paires.push({ key: source.cle, libelle: source.libelle, valeursPrev: source.valeurs, valeursReel: MOIS_CLES.map(()=>0) })
         }
       }
