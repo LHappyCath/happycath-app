@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, Fragment } from 'react'
+import { useState, useMemo, useEffect, Fragment, useRef } from 'react'
 import { useData } from '../lib/store'
 import { joursFeriesSaison, statutJour, compterSeances, joursDuMois, moisDeSaison, MOIS_FR } from '../lib/calendrierScolaire'
 
@@ -675,6 +675,256 @@ function fmtEurosSigne(n) {
   return sign + fmtEuros(Math.abs(n))
 }
 
+// Calcule, pour une saison, les soldes mensuels/cumulés Prévisionnel, Réel et
+// Atterrissage — même logique que l'onglet Mensuel (répartition des recettes cours,
+// lignes miroir, ajustements d'atterrissage), pour alimenter le graphique.
+function calculerEvolutionBudget(saison, ctx) {
+  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos } = ctx
+
+  const repRow = budgetRepartition.find(r => r.saison === saison) || {}
+  const rep = Object.fromEntries(MOIS_CLES.map(m => [m, Number(repRow[m])||0]))
+
+  const parCategorie = { Gym: [], Danse: [] }
+  for (const c of cours) {
+    if (c.categorie !== 'Gym' && c.categorie !== 'Danse') continue
+    const budget = budgetCoursPrevisionnel.find(b => b.cours_id === c.id && b.saison === saison)
+    if (!budget) continue
+    const tarif = Number(budget.tarif_prevu ?? c.tarif_plein ?? 0)
+    const ca = (budget.effectif_plein_prevu||0) * tarif + (budget.effectif_reduit_prevu||0) * tarif * 0.9
+    if (!ca) continue
+    const valeurs = MOIS_CLES.map(m => Math.round(ca * (rep[m]||0) / 100 * 100) / 100)
+    parCategorie[c.categorie].push({ valeurs })
+  }
+  const lignesCoursValeurs = [...parCategorie.Gym, ...parCategorie.Danse]
+    .map(l => Object.fromEntries(MOIS_CLES.map((m,i) => [m, l.valeurs[i]])))
+
+  const lignesPrevSaison = budgetPrevisionnel.filter(l => l.saison === saison)
+  const lignesReelSaison = budgetReel.filter(l => l.saison === saison)
+  const lignesRecettePrev = lignesPrevSaison.filter(l => l.type === 'recette')
+  const lignesChargePrev = lignesPrevSaison.filter(l => l.type === 'charge')
+  const lignesRecetteReel = lignesReelSaison.filter(l => l.type === 'recette')
+  const lignesChargeReel = lignesReelSaison.filter(l => l.type === 'charge')
+
+  const recettesPrevMois = totalParMois([...lignesCoursValeurs, ...lignesRecettePrev])
+  const chargesPrevMois = totalParMois(lignesChargePrev)
+  const recettesReelMois = totalParMois(lignesRecetteReel)
+  const chargesReelMois = totalParMois(lignesChargeReel)
+
+  const soldePrevMois = recettesPrevMois.map((r,i) => r - chargesPrevMois[i])
+  const soldeReelMois = recettesReelMois.map((r,i) => r - chargesReelMois[i])
+  let cp = 0, cr = 0
+  const soldePrevCumule = soldePrevMois.map(s => (cp += s))
+  const soldeReelCumule = soldeReelMois.map(s => (cr += s))
+
+  // Dernier mois (index 0=août ... 11=juillet) où une ligne réelle porte un montant non nul.
+  let dernierMoisAvecReel = -1
+  for (const l of lignesReelSaison) {
+    MOIS_CLES.forEach((m,i) => { if (Math.abs(Number(l[m]||0)) > 0.001 && i > dernierMoisAvecReel) dernierMoisAvecReel = i })
+  }
+
+  // Atterrissage : mêmes règles que l'onglet Mensuel (réel verrouillé sur les mois clos,
+  // sinon l'ajustement saisi ou, par défaut, le prévisionnel de la ligne miroir).
+  const moisClos = budgetMoisClos.find(m => m.saison === saison) || Object.fromEntries(MOIS_CLES.map(m => [m, false]))
+  const overridesParCle = Object.fromEntries(budgetAtterrissageLignes.filter(a => a.saison === saison).map(a => [a.lien, a]))
+
+  function pairesDuRegroupement(regroupementId, type) {
+    const prevLignes = lignesPrevSaison.filter(l => l.type === type && (l.regroupement_id || null) === regroupementId)
+    const reelLignes = lignesReelSaison.filter(l => l.type === type && (l.regroupement_id || null) === regroupementId)
+    const parCle = new Map()
+    for (const l of prevLignes) { const cle = l.lien || ('p_' + l.id); if (!parCle.has(cle)) parCle.set(cle, {}); parCle.get(cle).prev = l }
+    for (const l of reelLignes) { const cle = l.lien || ('r_' + l.id); if (!parCle.has(cle)) parCle.set(cle, {}); parCle.get(cle).reel = l }
+    return [...parCle.entries()].map(([, { prev, reel }]) => ({ valeursPrev: valeursDeLigne(prev), valeursReel: valeursDeLigne(reel), cle: prev?.lien || reel?.lien || prev?.id || reel?.id }))
+  }
+
+  function valeursAtterrissage(regroupementId, type) {
+    const paires = pairesDuRegroupement(regroupementId, type)
+    return MOIS_CLES.map((m,i) => paires.reduce((s,p) => {
+      const ov = overridesParCle[p.cle]
+      const v = moisClos[m] ? p.valeursReel[i] : ((ov && ov[m] != null) ? Number(ov[m]) : p.valeursPrev[i])
+      return s + v
+    }, 0))
+  }
+
+  const regroupementsRecette = regroupementsIndy.filter(r => r.type === 'recette')
+  const regroupementsCharge = regroupementsIndy.filter(r => r.type === 'charge')
+  const totalAtterrissageRecette = [...regroupementsRecette, { id: null }].map(r => valeursAtterrissage(r.id, 'recette'))
+  const totalAtterrissageCharge = [...regroupementsCharge, { id: null }].map(r => valeursAtterrissage(r.id, 'charge'))
+  const sommeAtterrissageRecette = MOIS_CLES.map((_,i) => totalAtterrissageRecette.reduce((s,v) => s + v[i], 0))
+  const sommeAtterrissageCharge = MOIS_CLES.map((_,i) => totalAtterrissageCharge.reduce((s,v) => s + v[i], 0))
+  const soldeAtterrissageMois = sommeAtterrissageRecette.map((r,i) => r - sommeAtterrissageCharge[i])
+  let catt = 0
+  const soldeAtterrissageCumule = soldeAtterrissageMois.map(s => (catt += s))
+
+  return { soldePrevCumule, soldeReelCumule, soldeAtterrissageCumule, dernierMoisAvecReel }
+}
+
+// Deux barres comparant un cumul Prévisionnel / Réel (du 1er mois au dernier mois avec du réel).
+function GraphiqueBarresComparaison({ prev, reel, libellePeriode }) {
+  const largeur = 360, hauteur = 220
+  const margeHaut = 26, zeroY = 150, largeurBarre = 84
+  const maxAbs = Math.max(1, Math.abs(prev), Math.abs(reel))
+  const echelle = (zeroY - margeHaut) / maxAbs
+  const donnees = [
+    { label: 'Prévisionnel cumulé', valeur: prev, couleur: '#2a78d6', x: largeur*0.28 },
+    { label: 'Réel cumulé', valeur: reel, couleur: '#eb6834', x: largeur*0.72 },
+  ]
+  return (
+    <div>
+      <div style={{ display:'flex', gap:16, justifyContent:'center', marginBottom:4 }}>
+        {donnees.map(d => (
+          <span key={d.label} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'#52514e' }}>
+            <span style={{ width:10, height:10, borderRadius:5, background:d.couleur, display:'inline-block' }} />
+            {d.label}
+          </span>
+        ))}
+      </div>
+      <svg width="100%" viewBox={`0 0 ${largeur} ${hauteur}`} style={{ maxWidth:420, display:'block', margin:'0 auto' }}>
+        <line x1={20} y1={zeroY} x2={largeur-20} y2={zeroY} stroke="#c3c2b7" strokeWidth="1" />
+        {donnees.map(d => {
+          const h = Math.abs(d.valeur) * echelle
+          const y = d.valeur >= 0 ? zeroY - h : zeroY
+          return (
+            <g key={d.label}>
+              <rect x={d.x - largeurBarre/2} y={y} width={largeurBarre} height={Math.max(h,1)} rx={4} fill={d.couleur} />
+              <text x={d.x} y={d.valeur >= 0 ? y - 8 : y + h + 18} textAnchor="middle" fontSize="13" fontWeight="600" fill="#0b0b0b">{fmtEurosSigne(d.valeur)}</text>
+            </g>
+          )
+        })}
+      </svg>
+      <p style={{ fontSize:11, color:'#898781', textAlign:'center', marginTop:2 }}>{libellePeriode}</p>
+    </div>
+  )
+}
+
+// Évolution sur l'année (12 mois) de trois courbes cumulées : Prévisionnel, Réel
+// (arrêtée au dernier mois disponible), Atterrissage.
+function GraphiqueEvolution({ soldePrevCumule, soldeReelCumule, soldeAtterrissageCumule, dernierMoisAvecReel }) {
+  const [survol, setSurvol] = useState(null)
+  const largeur = 680, hauteur = 260
+  const margeHautB = 16, margeBas = 34, margeGauche = 14, margeDroite = 96
+  const zoneW = largeur - margeGauche - margeDroite
+  const zoneH = hauteur - margeHautB - margeBas
+
+  const series = [
+    { nom: 'Prévisionnel', couleur: '#2a78d6', valeurs: soldePrevCumule },
+    { nom: 'Réel', couleur: '#eb6834', valeurs: soldeReelCumule.map((v,i) => i <= dernierMoisAvecReel ? v : null) },
+    { nom: 'Atterrissage', couleur: '#1baf7a', valeurs: soldeAtterrissageCumule },
+  ]
+
+  const toutesValeurs = series.flatMap(s => s.valeurs.filter(v => v != null))
+  const maxV = Math.max(0, ...toutesValeurs)
+  const minV = Math.min(0, ...toutesValeurs)
+  const span = (maxV - minV) || 1
+  const x = (i) => margeGauche + zoneW * i / 11
+  const y = (v) => margeHautB + zoneH - ((v - minV) / span) * zoneH
+  const yZero = y(0)
+
+  function onMove(e) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const px = (e.clientX - rect.left) / rect.width * largeur
+    const i = Math.round((px - margeGauche) / zoneW * 11)
+    setSurvol(Math.max(0, Math.min(11, i)))
+  }
+
+  // Points + point final de chaque courbe, avec une position de label anti-collision
+  // (les courbes qui finissent proches en hauteur voient leurs libellés écartés verticalement).
+  const tracés = series.map(s => {
+    const pts = s.valeurs.map((v,i) => v!=null ? [x(i), y(v)] : null).filter(Boolean)
+    return { ...s, d: pts.map((p,i) => (i===0?'M':'L')+p[0]+','+p[1]).join(' '), dernier: pts[pts.length-1] }
+  })
+  const ecartMin = 13
+  const ordre = tracés.map((t,i) => i).filter(i => tracés[i].dernier).sort((a,b) => tracés[a].dernier[1] - tracés[b].dernier[1])
+  const labelY = {}
+  ordre.forEach((i, rang) => { labelY[i] = tracés[i].dernier[1] })
+  for (let i = 1; i < ordre.length; i++) {
+    const prec = ordre[i-1], cur = ordre[i]
+    if (labelY[cur] - labelY[prec] < ecartMin) labelY[cur] = labelY[prec] + ecartMin
+  }
+
+  return (
+    <div>
+      <div style={{ display:'flex', gap:16, justifyContent:'center', marginBottom:6, flexWrap:'wrap' }}>
+        {series.map(s => (
+          <span key={s.nom} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'#52514e' }}>
+            <span style={{ width:10, height:10, borderRadius:5, background:s.couleur, display:'inline-block' }} />
+            {s.nom}
+          </span>
+        ))}
+      </div>
+      <svg width="100%" viewBox={`0 0 ${largeur} ${hauteur}`} style={{ display:'block' }}
+        onMouseMove={onMove} onMouseLeave={()=>setSurvol(null)}>
+        {[0,0.25,0.5,0.75,1].map(t => (
+          <line key={t} x1={margeGauche} x2={largeur-margeDroite} y1={margeHautB+zoneH*t} y2={margeHautB+zoneH*t} stroke="#e1e0d9" strokeWidth="1" />
+        ))}
+        <line x1={margeGauche} x2={largeur-margeDroite} y1={yZero} y2={yZero} stroke="#c3c2b7" strokeWidth="1" />
+        {MOIS_COURTS.map((m,i) => (
+          <text key={m} x={x(i)} y={hauteur-margeBas+18} textAnchor="middle" fontSize="10" fill="#898781">{m}</text>
+        ))}
+        {tracés.map((s, i) => (
+          <g key={s.nom}>
+            <path d={s.d} fill="none" stroke={s.couleur} strokeWidth="2" strokeLinecap="round" />
+            {s.dernier && <circle cx={s.dernier[0]} cy={s.dernier[1]} r="4" fill={s.couleur} />}
+            {s.dernier && <text x={s.dernier[0]+8} y={(labelY[i] ?? s.dernier[1])+4} fontSize="11" fontWeight="600" fill="#0b0b0b">{s.nom}</text>}
+          </g>
+        ))}
+        {survol != null && (
+          <g>
+            <line x1={x(survol)} x2={x(survol)} y1={margeHautB} y2={hauteur-margeBas} stroke="#c3c2b7" strokeWidth="1" strokeDasharray="3,3" />
+            {series.map(s => s.valeurs[survol] != null && (
+              <circle key={s.nom} cx={x(survol)} cy={y(s.valeurs[survol])} r="4.5" fill={s.couleur} stroke="#fff" strokeWidth="1.5" />
+            ))}
+          </g>
+        )}
+      </svg>
+      {survol != null && (
+        <div style={{ textAlign:'center', fontSize:12, color:'#52514e', marginTop:4 }}>
+          <strong style={{ color:'#0b0b0b' }}>{MOIS_COURTS[survol]}</strong> —{' '}
+          {series.map((s,i) => (
+            <span key={s.nom} style={{ marginRight:10 }}>
+              {s.nom} : <strong style={{ color:'#0b0b0b' }}>{s.valeurs[survol] != null ? fmtEurosSigne(s.valeurs[survol]) : '—'}</strong>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── ONGLET GRAPHIQUE ────────────────────────────────────────────────
+function OngletGraphique({ saison }) {
+  const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos } = useData()
+
+  const donnees = useMemo(() => calculerEvolutionBudget(saison, {
+    cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos
+  }), [saison, cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos])
+
+  const { soldePrevCumule, soldeReelCumule, soldeAtterrissageCumule, dernierMoisAvecReel } = donnees
+
+  return (
+    <div>
+      <p style={{ fontSize:13, color:'#888', marginBottom:16 }}>
+        Vue d'ensemble du budget pour la saison <strong>{saison}</strong>.
+      </p>
+
+      <div className="card" style={{ padding:20, marginBottom:20 }}>
+        <p style={{ ...LABEL, marginBottom:14 }}>Prévisionnel vs Réel — cumul août → {dernierMoisAvecReel >= 0 ? MOIS_COURTS[dernierMoisAvecReel] : '—'}</p>
+        {dernierMoisAvecReel < 0 ? (
+          <p style={{ fontSize:12, color:'#aaa' }}>Pas encore de réel enregistré sur cette saison.</p>
+        ) : (
+          <GraphiqueBarresComparaison prev={soldePrevCumule[dernierMoisAvecReel]} reel={soldeReelCumule[dernierMoisAvecReel]}
+            libellePeriode={`Solde cumulé d'août à ${MOIS_COURTS[dernierMoisAvecReel]}`} />
+        )}
+      </div>
+
+      <div className="card" style={{ padding:20, marginBottom:20 }}>
+        <p style={{ ...LABEL, marginBottom:14 }}>Évolution du solde cumulé sur la saison</p>
+        <GraphiqueEvolution soldePrevCumule={soldePrevCumule} soldeReelCumule={soldeReelCumule}
+          soldeAtterrissageCumule={soldeAtterrissageCumule} dernierMoisAvecReel={dernierMoisAvecReel} />
+      </div>
+    </div>
+  )
+}
+
 // Formulaire pour créer une nouvelle ligne libre (recette ou charge)
 function FormLigneBudget({ type, regroupements, regroupementParDefaut, initial, onClose, onCree }) {
   const [form, setForm] = useState(initial
@@ -1076,6 +1326,66 @@ function PanneauParametres({ regroupementsIndy, onClose, showToast }) {
   )
 }
 
+// Import d'un export FEC (Indy) : les comptes non reconnus se voient automatiquement
+// rattachés à un nouveau regroupement (nommé d'après le compte), puis les totaux Indy
+// des mois/saisons concernés sont écrasés. Un récap liste ce qui a été créé/mis à jour.
+function PanneauImportFEC({ onClose, showToast }) {
+  const { importerFEC } = useData()
+  const [nomFichier, setNomFichier] = useState('')
+  const [enCours, setEnCours] = useState(false)
+  const [resultat, setResultat] = useState(null)
+
+  function lireFichier(e) {
+    const fichier = e.target.files?.[0]
+    if (!fichier) return
+    setNomFichier(fichier.name)
+    setResultat(null)
+    const reader = new FileReader()
+    reader.onload = async (ev) => {
+      setEnCours(true)
+      const res = await importerFEC(ev.target.result)
+      setEnCours(false)
+      if (res?.error) { showToast('Erreur : ' + res.error); return }
+      setResultat(res)
+    }
+    reader.readAsText(fichier, 'utf-8')
+  }
+
+  return (
+    <Modal titre="Importer un export FEC (Indy)" onClose={onClose}>
+      <p style={{ fontSize:12, color:'#888', marginBottom:14 }}>
+        Dépose l'export FEC (comptable) de Indy. Seuls les comptes de charges (classe 6) et de produits (classe 7) sont pris en compte ; banque, TVA, associés... sont ignorés automatiquement. Un compte encore inconnu crée automatiquement son propre regroupement Indy (renommable ensuite dans "⚙ Regroupements Indy"). L'import peut couvrir plusieurs mois et plusieurs saisons à la fois, et écrase le "Total Indy" des regroupements concernés.
+      </p>
+
+      {!resultat && (
+        <input type="file" accept=".csv,.txt" onChange={lireFichier} disabled={enCours} style={{ fontSize:13 }} />
+      )}
+      {enCours && <p style={{ fontSize:12, color:'#888', marginTop:10 }}>Import de {nomFichier} en cours...</p>}
+
+      {resultat && (
+        <>
+          <p style={{ fontSize:13, color:'#1D9E75', fontWeight:600, marginTop:14 }}>
+            Import terminé : {resultat.nbEcritures} total(aux) Indy mis à jour.
+          </p>
+          {resultat.regroupementsCrees.length > 0 ? (
+            <>
+              <p style={{ ...LABEL, marginTop:14 }}>Regroupements créés automatiquement</p>
+              {resultat.regroupementsCrees.map(r => (
+                <div key={r.compte} style={{ fontSize:13, padding:'4px 0', borderTop:'0.5px solid #f5f5f5' }}>
+                  <strong>{r.nom}</strong> <span style={{ color:'#aaa' }}>({r.type}, compte {r.compte})</span>
+                </div>
+              ))}
+            </>
+          ) : (
+            <p style={{ fontSize:12, color:'#888', marginTop:10 }}>Aucun nouveau regroupement : tous les comptes étaient déjà reconnus.</p>
+          )}
+          <button style={{ ...BTN.ghost, marginTop:16 }} onClick={onClose}>Fermer</button>
+        </>
+      )}
+    </Modal>
+  )
+}
+
 function EnteteTableau({ label }) {
   return (
     <thead>
@@ -1100,6 +1410,7 @@ function OngletMensuel({ saison, showToast }) {
   const [ouvertes, setOuvertes] = useState({ Gym: false, Danse: false })
   const [modalLigne, setModalLigne] = useState(null) // { type, regroupementId } | null
   const [showParametres, setShowParametres] = useState(false)
+  const [showImportFEC, setShowImportFEC] = useState(false)
 
   const table = vue === 'reel' ? 'budget_reel' : 'budget_previsionnel'
   const lignesPrevSaison = budgetPrevisionnel.filter(l => l.saison === saison)
@@ -1292,7 +1603,10 @@ function OngletMensuel({ saison, showToast }) {
         <p style={{ fontSize:13, color:'#888', margin:0, flex:1, minWidth:260 }}>
           Budget mensuel (août → juillet) pour la saison <strong>{saison}</strong>. Les recettes Gym/Danse sont calculées automatiquement à partir de "Recettes par cours", réparties sur les mois selon la clé ci-dessous.
         </p>
-        <button style={BTN.ghost} onClick={()=>setShowParametres(true)}>⚙ Regroupements Indy</button>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <button style={BTN.ghost} onClick={()=>setShowImportFEC(true)}>⬆ Importer FEC (Indy)</button>
+          <button style={BTN.ghost} onClick={()=>setShowParametres(true)}>⚙ Regroupements Indy</button>
+        </div>
       </div>
 
       <div className="card" style={{ padding:16, marginBottom:20 }}>
@@ -1554,6 +1868,10 @@ function OngletMensuel({ saison, showToast }) {
         <PanneauParametres regroupementsIndy={regroupementsIndy}
           onClose={()=>setShowParametres(false)} showToast={showToast} />
       )}
+
+      {showImportFEC && (
+        <PanneauImportFEC onClose={()=>setShowImportFEC(false)} showToast={showToast} />
+      )}
     </div>
   )
 }
@@ -1587,12 +1905,14 @@ export default function Budget() {
         <button onClick={()=>setOnglet('tarifs')} style={{ ...BTN.ghost, ...(onglet==='tarifs' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Tarifs</button>
         <button onClick={()=>setOnglet('recettes')} style={{ ...BTN.ghost, ...(onglet==='recettes' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Recettes par cours</button>
         <button onClick={()=>setOnglet('mensuel')} style={{ ...BTN.ghost, ...(onglet==='mensuel' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Mensuel</button>
+        <button onClick={()=>setOnglet('graphique')} style={{ ...BTN.ghost, ...(onglet==='graphique' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Graphique</button>
       </div>
 
       {onglet === 'recettes' && <OngletRecettes saison={saison} showToast={showToast} />}
       {onglet === 'tarifs' && <OngletTarifs saison={saison} showToast={showToast} />}
       {onglet === 'calendrier' && <OngletCalendrier saison={saison} showToast={showToast} />}
       {onglet === 'mensuel' && <OngletMensuel saison={saison} showToast={showToast} />}
+      {onglet === 'graphique' && <OngletGraphique saison={saison} />}
 
       {toast && (
         <div style={{ position:'fixed', bottom:90, left:'50%', transform:'translateX(-50%)', background:'#1a1a1a', color:'#fff', padding:'10px 20px', borderRadius:20, fontSize:14, fontWeight:500, zIndex:400, whiteSpace:'nowrap' }}>
