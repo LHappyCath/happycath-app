@@ -773,7 +773,7 @@ function OngletCalendrier({ saison, showToast }) {
 
 // ─── ONGLET MENSUEL (prévisionnel + réel, par mois) ─────────────────
 const MOIS_CLES = ['aout','septembre','octobre','novembre','decembre','janvier','fevrier','mars','avril','mai','juin','juillet']
-const MOIS_COURTS = ['Août','Sept','Oct','Nov','Déc','Janv','Fév','Mars','Avr','Mai','Juin','Juil']
+export const MOIS_COURTS = ['Août','Sept','Oct','Nov','Déc','Janv','Fév','Mars','Avr','Mai','Juin','Juil']
 // Largeur fixe de la 1ère colonne (libellé), identique sur tous les tableaux Recettes/Charges
 // pour que les colonnes de mois restent alignées d'un tableau à l'autre.
 const LARGEUR_LIBELLE = 210
@@ -792,7 +792,7 @@ function fmtEurosSigne(n) {
 // Calcule, pour une saison, les soldes mensuels/cumulés Prévisionnel, Réel et
 // Atterrissage — même logique que l'onglet Mensuel (répartition des recettes cours,
 // lignes miroir, ajustements d'atterrissage), pour alimenter le graphique.
-function calculerEvolutionBudget(saison, ctx) {
+export function calculerEvolutionBudget(saison, ctx) {
   const { cours, budgetCoursPrevisionnel, budgetRepartition, budgetPrevisionnel, budgetReel, budgetAutresRecettes, regroupementsIndy, budgetAtterrissageLignes, budgetMoisClos, budgetSoldeInitial, parametres } = ctx
   const soldeInitial = Number((budgetSoldeInitial||[]).find(s => s.saison === saison)?.montant || 0)
 
@@ -903,7 +903,7 @@ function calculerEvolutionBudget(saison, ctx) {
 }
 
 // Deux barres comparant un cumul Prévisionnel / Réel (du 1er mois au dernier mois avec du réel).
-function GraphiqueBarresComparaison({ prev, reel, libellePeriode }) {
+export function GraphiqueBarresComparaison({ prev, reel, libellePeriode }) {
   const largeur = 360, hauteur = 220
   const margeHaut = 26, zeroY = 150, largeurBarre = 84
   const maxAbs = Math.max(1, Math.abs(prev), Math.abs(reel))
@@ -942,7 +942,7 @@ function GraphiqueBarresComparaison({ prev, reel, libellePeriode }) {
 
 // Évolution sur l'année (12 mois) de trois courbes cumulées : Prévisionnel, Réel
 // (arrêtée au dernier mois disponible), Atterrissage.
-function GraphiqueEvolution({ soldePrevCumule, soldeReelCumule, soldeAtterrissageCumule, dernierMoisAvecReel }) {
+export function GraphiqueEvolution({ soldePrevCumule, soldeReelCumule, soldeAtterrissageCumule, dernierMoisAvecReel }) {
   const [survol, setSurvol] = useState(null)
   const largeur = 680, hauteur = 260
   const margeHautB = 16, margeBas = 34, margeGauche = 62, margeDroite = 150
