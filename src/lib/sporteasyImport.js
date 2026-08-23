@@ -315,3 +315,24 @@ export function suggererMembreExistant(nomNouveau, membresExistants) {
   }
   return meilleurScore >= 30 ? meilleur : null
 }
+
+// Suggère un cours déjà existant dont le nom ressemble à un cours nouvellement rencontré
+// dans l'import (jour/heure ignorés : un créneau peut avoir changé). Ne lie jamais
+// automatiquement : sert uniquement à pré-sélectionner un choix proposé à l'utilisateur.
+export function suggererCoursExistant(coursNouveau, coursExistants) {
+  const tNouveau = new Set(normName(coursNouveau.nom).split(' ').filter(Boolean))
+  let meilleur = null, meilleurScore = 0
+  for (const c of coursExistants) {
+    const tExist = new Set(normName(c.nom).split(' ').filter(Boolean))
+    if (tExist.size === 0 || tNouveau.size === 0) continue
+    const identiques = tExist.size === tNouveau.size && [...tExist].every(t => tNouveau.has(t))
+    const inclusion = [...tExist].every(t => tNouveau.has(t)) || [...tNouveau].every(t => tExist.has(t))
+    const intersection = [...tExist].filter(t => tNouveau.has(t)).length
+    let score = 0
+    if (identiques) score = 100
+    else if (inclusion && intersection > 0) score = 70
+    else if (intersection > 0) score = 30 * intersection
+    if (score > meilleurScore) { meilleurScore = score; meilleur = c }
+  }
+  return meilleurScore >= 30 ? meilleur : null
+}

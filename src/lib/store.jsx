@@ -403,6 +403,32 @@ export function DataProvider({ children }) {
     return { success: true }
   }
 
+  // Un cours a un historique s'il a déjà eu au moins un appel, une inscription, un
+  // règlement ou un tarif enregistré — dans ce cas, seul l'archivage est possible.
+  function coursALaHistorique(id) {
+    return historique.some(h => h.cours_id === id) ||
+      inscriptions.some(i => i.cours_id === id) ||
+      reglements.some(r => r.cours_id === id) ||
+      tarifs.some(t => t.cours_id === id) ||
+      budgetCoursPrevisionnel.some(b => b.cours_id === id)
+  }
+
+  // Suppression réelle (irréversible) : uniquement si aucun historique n'est lié au cours.
+  async function supprimerDefinitivementCours(id) {
+    if (coursALaHistorique(id)) return { error: "Ce cours a un historique (appels, inscriptions, règlements ou tarifs) : il ne peut qu'être archivé." }
+    if (!navigator.onLine) return { offline: true }
+    try {
+      const { error } = await supabase.from('cours').delete().eq('id', id)
+      if (error) throw error
+      setCours(prev => prev.filter(c => c.id !== id))
+      const cached = loadCache()
+      if (cached) { cached.cours = (cached.cours||[]).filter(c => c.id !== id); saveCache(cached) }
+      return { success: true }
+    } catch(e) {
+      return { error: e.message || 'Erreur lors de la suppression' }
+    }
+  }
+
   // Crée un cours "en préparation" pour une future saison : n'apparaît ni dans
   // Cours & appel (actif=false) ni comme proposable à l'inscription (ouvert_inscriptions=false)
   // tant qu'on ne l'active pas explicitement. Utilisé depuis l'écran Budget.
@@ -450,6 +476,32 @@ export function DataProvider({ children }) {
     const cached = loadCache()
     if (cached) { cached.membres = (cached.membres||[]).map(m => m.id === id ? { ...m, actif: true } : m); saveCache(cached) }
     return { success: true }
+  }
+
+  // Un membre a un historique s'il a déjà eu au moins un appel (présent/absent/invité), une
+  // inscription, un règlement ou un abonnement enregistré — dans ce cas, seul l'archivage
+  // est possible.
+  function membreALaHistorique(id) {
+    return historique.some(h => (h.presents||[]).includes(id) || (h.absents||[]).includes(id) || (h.guests||[]).some(g => g.membreId === id)) ||
+      inscriptions.some(i => i.membre_id === id) ||
+      reglements.some(r => r.membre_id === id) ||
+      abonnements.some(a => a.membre_id === id)
+  }
+
+  // Suppression réelle (irréversible) : uniquement si aucun historique n'est lié au membre.
+  async function supprimerDefinitivementMembre(id) {
+    if (membreALaHistorique(id)) return { error: "Ce membre a un historique (appels, inscriptions, règlements ou abonnements) : il ne peut qu'être archivé." }
+    if (!navigator.onLine) return { offline: true }
+    try {
+      const { error } = await supabase.from('membres').delete().eq('id', id)
+      if (error) throw error
+      setMembres(prev => prev.filter(m => m.id !== id))
+      const cached = loadCache()
+      if (cached) { cached.membres = (cached.membres||[]).filter(m => m.id !== id); saveCache(cached) }
+      return { success: true }
+    } catch(e) {
+      return { error: e.message || 'Erreur lors de la suppression' }
+    }
   }
 
   async function sauvegarderInscriptions(membreId, coursIds) {
@@ -1440,8 +1492,8 @@ export function DataProvider({ children }) {
     ajouterBanque,
     creerRemises, ajouterChequesRemise, modifierStatutRemise, supprimerRemise, retirerChequeRemise,
     sauvegarderAppel,
-    sauvegarderCours, supprimerCours, reactiverCours, creerCoursBrouillon, toggleOuvertInscriptions,
-    sauvegarderMembre, archiverMembre, reactiverMembre,
+    sauvegarderCours, supprimerCours, reactiverCours, creerCoursBrouillon, toggleOuvertInscriptions, supprimerDefinitivementCours,
+    sauvegarderMembre, archiverMembre, reactiverMembre, supprimerDefinitivementMembre,
     sauvegarderInscriptions,
     supprimerAppel,
     sauvegarderAbonnement,
@@ -1458,6 +1510,8 @@ export function DataProvider({ children }) {
     mettreAJourMembres,
     mettreAJourMembresLot,
     // Utilitaires
+    coursSupprimable: (id) => !coursALaHistorique(id),
+    membreSupprimable: (id) => !membreALaHistorique(id),
     inscritsDuCours: (coursId) => membres.filter(m => inscriptions.some(i => i.cours_id === coursId && i.membre_id === m.id)).sort((a,b) => a.nom.localeCompare(b.nom)),
     coursDuMembre: (membreId) => cours.filter(c => inscriptions.some(i => i.membre_id === membreId && i.cours_id === c.id)),
     appelsDuCours: (coursId) => historique.filter(h => h.cours_id === coursId).sort((a,b) => b.date.localeCompare(a.date)),
