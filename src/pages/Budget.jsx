@@ -439,7 +439,6 @@ function LigneTarif({ cours: c, tarifAnnuel, nbSeancesPrevues, tarifsExistants, 
       const montant = calculerMontant(p)
       if (montant !== null) onMontantCalcule(c.id, p.cle, montant)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tarifAnnuel, nbSeancesPrevues])
 
   return (
