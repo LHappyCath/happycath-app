@@ -628,12 +628,92 @@ function VueRemises() {
 }
 
 
+// ─── SYNTHÈSE MENSUELLE (mode de règlement × mois d'encaissement) ──
+const CELL = { padding:'8px 10px', borderBottom:'0.5px solid rgba(0,0,0,0.06)', whiteSpace:'nowrap' }
+const ORDRE_MODES = ['Chèque', 'CB', 'Espèces', 'Virement', 'Autre']
+
+function fmtMoisCourt(moisStr) {
+  const [y, m] = moisStr.split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' })
+}
+
+// Vue prévisionnelle des encaissements par mois : inclut tout ce qui a une date
+// d'encaissement (chèques à venir compris), pas seulement ce qui est déjà encaissé.
+function VueSynthese({ reglements, filtreSaison }) {
+  const data = useMemo(() => {
+    const base = reglements.filter(r => (filtreSaison === 'Toutes' || r.saison === filtreSaison) && r.date_encaissement)
+    const parMoisMode = {}
+    const moisSet = new Set()
+    const modesSet = new Set()
+    for (const r of base) {
+      const mois = String(r.date_encaissement).slice(0, 7)
+      const mode = r.mode || 'Autre'
+      moisSet.add(mois)
+      modesSet.add(mode)
+      if (!parMoisMode[mois]) parMoisMode[mois] = {}
+      parMoisMode[mois][mode] = (parMoisMode[mois][mode] || 0) + Number(r.montant || 0)
+    }
+    const mois = [...moisSet].sort()
+    const modes = ORDRE_MODES.filter(m => modesSet.has(m)).concat([...modesSet].filter(m => !ORDRE_MODES.includes(m)))
+    return { mois, modes, parMoisMode }
+  }, [reglements, filtreSaison])
+
+  const totalMois = (mo) => data.modes.reduce((s, mode) => s + (data.parMoisMode[mo]?.[mode] || 0), 0)
+  const totalMode = (mode) => data.mois.reduce((s, mo) => s + (data.parMoisMode[mo]?.[mode] || 0), 0)
+  const totalGeneral = data.mois.reduce((s, mo) => s + totalMois(mo), 0)
+
+  if (data.mois.length === 0) {
+    return <p style={{ fontSize:14, color:'#888', textAlign:'center', padding:30 }}>Aucun règlement daté pour cette période.</p>
+  }
+
+  return (
+    <div>
+      <p style={{ fontSize:12, color:'#888', marginBottom:14 }}>
+        Montants prévus par mois d'encaissement (chèques à venir inclus), tous statuts confondus — {filtreSaison === 'Toutes' ? 'toutes saisons' : `saison ${filtreSaison}`}.
+      </p>
+      <div style={{ overflowX:'auto' }}>
+        <table style={{ borderCollapse:'collapse', width:'100%', fontSize:13 }}>
+          <thead>
+            <tr>
+              <th style={{ ...CELL, textAlign:'left', color:'#888', fontWeight:500 }}>Mode</th>
+              {data.mois.map(mo => (
+                <th key={mo} style={{ ...CELL, textAlign:'right', color:'#888', fontWeight:500, textTransform:'capitalize' }}>{fmtMoisCourt(mo)}</th>
+              ))}
+              <th style={{ ...CELL, textAlign:'right', fontWeight:600 }}>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.modes.map(mode => (
+              <tr key={mode}>
+                <td style={{ ...CELL, textAlign:'left', fontWeight:500 }}>{mode}</td>
+                {data.mois.map(mo => (
+                  <td key={mo} style={{ ...CELL, textAlign:'right', color: data.parMoisMode[mo]?.[mode] ? '#1a1a1a' : '#ddd' }}>
+                    {data.parMoisMode[mo]?.[mode] ? fmtEuros(data.parMoisMode[mo][mode]) : '—'}
+                  </td>
+                ))}
+                <td style={{ ...CELL, textAlign:'right', fontWeight:600 }}>{fmtEuros(totalMode(mode))}</td>
+              </tr>
+            ))}
+            <tr>
+              <td style={{ ...CELL, textAlign:'left', fontWeight:600, borderTop:'1.5px solid rgba(0,0,0,0.15)' }}>Total</td>
+              {data.mois.map(mo => (
+                <td key={mo} style={{ ...CELL, textAlign:'right', fontWeight:600, borderTop:'1.5px solid rgba(0,0,0,0.15)' }}>{fmtEuros(totalMois(mo))}</td>
+              ))}
+              <td style={{ ...CELL, textAlign:'right', fontWeight:700, color:'#FF0099', borderTop:'1.5px solid rgba(0,0,0,0.15)' }}>{fmtEuros(totalGeneral)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export default function Reglements() {
   const { reglements, cours, saisonActive } = useData()
   const [showCheques, setShowCheques] = useState(false)
   const [showSimple, setShowSimple] = useState(false)
   const [showRemise, setShowRemise] = useState(false)
-  const [ongletVue, setOngletVue] = useState('reglements') // 'reglements' | 'remises'
+  const [ongletVue, setOngletVue] = useState('reglements') // 'reglements' | 'remises' | 'synthese'
   const [filtreMode, setFiltreMode] = useState('Tous')
   const [filtreEndossement, setFiltreEndossement] = useState('Tous')
   const [filtreSaison, setFiltreSaison] = useState(saisonActive)
@@ -668,10 +748,19 @@ export default function Reglements() {
       <div style={{ display:'flex', gap:8, marginBottom:16 }}>
         <button onClick={()=>setOngletVue('reglements')} style={{ ...BTN.ghost, ...(ongletVue==='reglements' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Règlements</button>
         <button onClick={()=>setOngletVue('remises')} style={{ ...BTN.ghost, ...(ongletVue==='remises' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>Remises en banque</button>
+        <button onClick={()=>setOngletVue('synthese')} style={{ ...BTN.ghost, ...(ongletVue==='synthese' ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>📊 Synthèse par mois</button>
       </div>
 
       {ongletVue === 'remises' ? (
         <VueRemises />
+      ) : ongletVue === 'synthese' ? (
+        <div>
+          <select style={{ ...INPUT, width:'auto', fontWeight:600, marginBottom:16 }} value={filtreSaison} onChange={e=>setFiltreSaison(e.target.value)}>
+            <option value="Toutes">Toutes les saisons</option>
+            {saisons.map(s => <option key={s} value={s}>{s}{s===saisonActive ? ' (active)' : ''}</option>)}
+          </select>
+          <VueSynthese reglements={reglements} filtreSaison={filtreSaison} />
+        </div>
       ) : (
       <>
 
