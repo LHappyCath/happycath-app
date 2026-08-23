@@ -504,24 +504,28 @@ export function DataProvider({ children }) {
     }
   }
 
+  // Ne remplace que les inscriptions de la SAISON ACTIVE : on ne touche pas aux inscriptions
+  // d'autres saisons (ex: importées via SportEasy), et on tague les nouvelles avec la saison —
+  // sans quoi le compteur d'inscrits par cours (filtré par saison) ne les voit plus.
   async function sauvegarderInscriptions(membreId, coursIds) {
-    const newInscrits = coursIds.map(cId => ({ cours_id: cId, membre_id: membreId }))
+    const newInscrits = coursIds.map(cId => ({ cours_id: cId, membre_id: membreId, saison: saisonActive }))
+    const estAutreSaison = (i) => !(i.membre_id === membreId && i.saison === saisonActive)
 
     setInscriptions(prev => [
-      ...prev.filter(i => i.membre_id !== membreId),
+      ...prev.filter(estAutreSaison),
       ...newInscrits
     ])
 
     if (!navigator.onLine) {
-      enqueue({ action: 'upsert', table: '_inscriptions_batch', payload: { membreId, coursIds } })
+      enqueue({ action: 'upsert', table: '_inscriptions_batch', payload: { membreId, coursIds, saison: saisonActive } })
       return { offline: true }
     }
 
-    await supabase.from('inscriptions').delete().eq('membre_id', membreId)
+    await supabase.from('inscriptions').delete().eq('membre_id', membreId).eq('saison', saisonActive)
     if (coursIds.length > 0) await supabase.from('inscriptions').insert(newInscrits)
     const cached = loadCache()
     if (cached) {
-      cached.inscriptions = [...(cached.inscriptions||[]).filter(i=>i.membre_id!==membreId), ...newInscrits]
+      cached.inscriptions = [...(cached.inscriptions||[]).filter(estAutreSaison), ...newInscrits]
       saveCache(cached)
     }
     return { success: true }
