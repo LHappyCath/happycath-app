@@ -99,7 +99,7 @@ function FormCours({ initial, onSave, onClose }) {
 }
 
 // ─── PLANNING ───────────────────────────────────────────────────
-function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditCours, onDeleteCours, onReactiverCours, onNouveauCours, online, archiveMode, toggle, saisonAffichee, tarifs, saisonActive }) {
+function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditCours, onDeleteCours, onReactiverCours, onSupprimerDefinitif, coursSupprimable, onNouveauCours, online, archiveMode, toggle, saisonAffichee, tarifs, saisonActive }) {
   const aujourdJour = new Date().getDay()
   const [jourActif, setJourActif] = useState(aujourdJour)
   const coursDuJour = [...cours].filter(c=>c.jour===jourActif).sort((a,b)=>a.heure.localeCompare(b.heure))
@@ -163,6 +163,11 @@ function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditC
                   {!archiveMode && <button onClick={()=>onEditCours(c)} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px' }}>Modifier</button>}
                   {online && !archiveMode && <button onClick={()=>onDeleteCours(c)} style={{ background:'none', border:'none', cursor:'pointer', fontSize:12, color:'#ccc', padding:'6px 8px' }}>Supprimer</button>}
                   {online && archiveMode && <button onClick={()=>onReactiverCours(c)} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px', color:'#1D9E75' }}>Réactiver</button>}
+                  {online && archiveMode && (
+                    coursSupprimable(c.id)
+                      ? <button onClick={()=>onSupprimerDefinitif(c)} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px', color:'#E24B4A' }}>Supprimer définitivement</button>
+                      : <span style={{ fontSize:11, color:'#ccc', padding:'6px 4px', alignSelf:'center' }} title="Historique lié (appels, inscriptions, règlements ou tarifs) : archivage uniquement">Non supprimable (historique)</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -453,7 +458,7 @@ function HistoriqueCours({ cours, onRetour, onEditer }) {
 // ─── COMPOSANT PRINCIPAL ────────────────────────────────────────
 export default function Cours() {
   const [searchParams] = useSearchParams()
-  const { cours, inscriptions, sauvegarderAppel, supprimerCours, reactiverCours, online, historique, saisonActive, tarifs } = useData()
+  const { cours, inscriptions, sauvegarderAppel, supprimerCours, reactiverCours, supprimerDefinitivementCours, coursSupprimable, online, historique, saisonActive, tarifs } = useData()
   const [vue, setVue] = useState('planning')
   const [coursSelectionne, setCoursSelectionne] = useState(null)
   const [appelExistant, setAppelExistant] = useState(null)
@@ -504,6 +509,14 @@ export default function Cours() {
     showToast('Cours réactivé')
   }
 
+  async function handleSupprimerDefinitivement(c) {
+    if (!online) { showToast('Suppression impossible hors ligne'); return }
+    if (!window.confirm(`Supprimer définitivement le cours "${c.nom}" ? Cette action est irréversible.`)) return
+    const res = await supprimerDefinitivementCours(c.id)
+    if (res?.error) { showToast(res.error); return }
+    showToast('Cours supprimé définitivement')
+  }
+
   function showToast(msg) { setToast(msg); setTimeout(()=>setToast(null), 3000) }
 
   return (
@@ -518,6 +531,8 @@ export default function Cours() {
           onEditCours={c=>setModalCours(c)}
           onDeleteCours={handleSupprimerCours}
           onReactiverCours={handleReactiverCours}
+          onSupprimerDefinitif={handleSupprimerDefinitivement}
+          coursSupprimable={coursSupprimable}
           onNouveauCours={()=>setModalCours('nouveau')}
           toggle={
             <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap', alignItems:'center' }}>

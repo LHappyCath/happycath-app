@@ -145,8 +145,8 @@ function FormMembre({ initial, onSave, onClose }) {
 }
 
 // ─── FICHE MEMBRE ───────────────────────────────────────────────
-function FicheMembre({ membre, onClose, onEdit, onArchiver }) {
-  const { cours, inscriptions, historique, reglements, online, reactiverMembre, saisonActive } = useData()
+function FicheMembre({ membre, onClose, onEdit, onArchiver, onSupprimerDefinitif }) {
+  const { cours, inscriptions, historique, reglements, online, reactiverMembre, membreSupprimable, saisonActive } = useData()
   const [stats, setStats] = useState(null)
   const [sessions, setSessions] = useState([])
   const [filtreSaison, setFiltreSaison] = useState(saisonActive)
@@ -230,6 +230,11 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver }) {
           <button onClick={onEdit} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px' }}>Modifier</button>
           {online && membre.actif === false && (
             <button onClick={()=>reactiverMembre(membre.id)} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px', color:'#1D9E75' }}>Réactiver</button>
+          )}
+          {online && membre.actif === false && (
+            membreSupprimable(membre.id)
+              ? <button onClick={onSupprimerDefinitif} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px', color:'#E24B4A' }}>Supprimer définitivement</button>
+              : <span style={{ fontSize:11, color:'#ccc', alignSelf:'center' }} title="Historique lié (appels, inscriptions, règlements ou abonnements) : archivage uniquement">Non supprimable</span>
           )}
           {online && membre.actif !== false && <button onClick={onArchiver} style={{ background:'none', border:'none', cursor:'pointer', color:'#ddd', fontSize:16, padding:'6px 8px' }}>🗑</button>}
         </div>
@@ -539,7 +544,7 @@ function ImportRoster({ onClose }) {
 export default function Membres() {
   const location = useLocation()
   const membreIdFromNav = location.state?.membreId
-  const { membres, online, archiverMembre, inscriptions, saisonActive, cours } = useData()
+  const { membres, online, archiverMembre, supprimerDefinitivementMembre, inscriptions, saisonActive, cours } = useData()
   const [search, setSearch] = useState('')
   const [vue, setVue] = useState('liste')
   const [selectedId, setSelectedId] = useState(null)
@@ -563,6 +568,15 @@ export default function Membres() {
     if (!window.confirm(`Archiver ${membre.nom} ?`)) return
     await archiverMembre(membre.id)
     showToast('Membre archivé')
+    setVue('liste'); setSelectedId(null)
+  }
+
+  async function supprimerDefinitivement(membre) {
+    if (!online) { showToast('Suppression impossible hors ligne'); return }
+    if (!window.confirm(`Supprimer définitivement ${membre.nom} ? Cette action est irréversible.`)) return
+    const res = await supprimerDefinitivementMembre(membre.id)
+    if (res?.error) { showToast(res.error); return }
+    showToast('Membre supprimé définitivement')
     setVue('liste'); setSelectedId(null)
   }
 
@@ -597,7 +611,8 @@ export default function Membres() {
         <FicheMembre membre={selected}
           onClose={()=>{setVue('liste');setSelectedId(null)}}
           onEdit={()=>setModal(selected)}
-          onArchiver={()=>archiver(selected)} />
+          onArchiver={()=>archiver(selected)}
+          onSupprimerDefinitif={()=>supprimerDefinitivement(selected)} />
         {modal && (
           <Modal titre={`Modifier — ${modal.nom}`} onClose={()=>setModal(null)}>
             <FormMembre initial={modal}
