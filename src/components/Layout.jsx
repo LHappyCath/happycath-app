@@ -10,7 +10,7 @@ const NAV_ITEMS = [
   { to: '/inscriptions', icon: '📥', label: 'Inscriptions',    section: 'Gestion' },
   { to: '/reglements',   icon: '💶', label: 'Règlements',      section: null },
   { to: '/budget',       icon: '📊', label: 'Budget',          section: null },
-  { to: '/factures',     icon: '🧾', label: 'Factures',        section: null },
+  { to: '/resultats',    icon: '🧮', label: 'Résultats',       section: null },
 ]
 
 const BOTTOM_NAV = [
