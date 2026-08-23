@@ -428,6 +428,20 @@ function LigneTarif({ cours: c, tarifAnnuel, nbSeancesPrevues, tarifsExistants, 
     if (montant !== null) onMontantCalcule(c.id, p.cle, montant)
   }
 
+  // Le montant calculé (annuel/diviseur × majoration) n'était enregistré dans "tarifs" que si
+  // l'utilisateur cliquait puis quittait le champ Majoration (onBlur) — donc jamais quand la
+  // majoration reste à 0% par défaut. On enregistre aussi automatiquement dès que le tarif
+  // Annuel ou le nombre de séances prévues change, pour que le cas "0% de majoration" remonte
+  // bien dans la carte du cours.
+  useEffect(() => {
+    if (!tarifAnnuel) return
+    for (const p of PERIODICITES_DECLINEES) {
+      const montant = calculerMontant(p)
+      if (montant !== null) onMontantCalcule(c.id, p.cle, montant)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tarifAnnuel, nbSeancesPrevues])
+
   return (
     <div style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:12, padding:'12px 14px', marginBottom:8 }}>
       <div style={{ display:'flex', alignItems:'baseline', gap:10, marginBottom:10, flexWrap:'wrap' }}>
