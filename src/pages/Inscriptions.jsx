@@ -1,6 +1,17 @@
 import { useState, useRef, useMemo } from 'react'
 import { useData } from '../lib/store'
-import { lireFichierSportEasy, parserCotisations, suggererMembreExistant } from '../lib/sporteasyImport'
+import { lireFichierSportEasy, parserCotisations, suggererMembreExistant, normName } from '../lib/sporteasyImport'
+
+// Retrouve un cours déjà existant en base à partir du cours parsé depuis SportEasy
+// (nom + jour + heure), pour ne pas recréer un cours qui existe déjà sous un autre id
+// (ex: un cours créé à la main dans l'écran Cours a un id différent de celui généré par l'import).
+function trouverCoursExistant(coursParsed, coursExistants) {
+  return coursExistants.find(c =>
+    normName(c.nom) === normName(coursParsed.nom) &&
+    c.jour === coursParsed.jour &&
+    c.heure === coursParsed.heure
+  ) || null
+}
 
 const BTN = {
   primary: { padding:'9px 18px', borderRadius:8, border:'none', background:'#FF0099', color:'#fff', cursor:'pointer', fontSize:14, fontWeight:500 },
@@ -126,15 +137,27 @@ export default function Inscriptions() {
     const reglementsFiltres = parsedBrut.reglements.filter(r => saisonsChoisies.includes(r.saison))
     const remap = (mid) => (resolutions[mid] && resolutions[mid] !== 'nouveau') ? resolutions[mid] : mid
 
-    const inscriptionsFinales = inscriptionsFiltrees.map(i => ({ ...i, membre_id: remap(i.membre_id) }))
-    const reglementsFinaux = reglementsFiltres.map(r => ({ ...r, membre_id: remap(r.membre_id) }))
+    // Rattache chaque cours parsé du fichier à un cours déjà existant (nom + jour + heure) :
+    // si trouvé, on réutilise son id réel au lieu de l'id généré par l'import, pour ne pas
+    // recréer un cours qui existe déjà.
+    const remapCoursId = {}
+    for (const c of parsedBrut.cours) {
+      const existant = trouverCoursExistant(c, cours)
+      if (existant) remapCoursId[c.id] = existant.id
+    }
+    const remapCours = (cid) => remapCoursId[cid] || cid
+
+    const inscriptionsFinales = inscriptionsFiltrees.map(i => ({ ...i, membre_id: remap(i.membre_id), cours_id: remapCours(i.cours_id) }))
+    const reglementsFinaux = reglementsFiltres.map(r => ({ ...r, membre_id: remap(r.membre_id), cours_id: remapCours(r.cours_id) }))
     const membresFinaux = parsedBrut.membres.filter(m => {
       const utilise = inscriptionsFinales.some(i => i.membre_id === m.id)
       const resolutionEstNouveau = !Object.prototype.hasOwnProperty.call(resolutions, m.id) || resolutions[m.id] === 'nouveau'
       return utilise && resolutionEstNouveau
     })
     const coursIdsUtilises = new Set(inscriptionsFinales.map(i => i.cours_id))
-    const coursFinaux = parsedBrut.cours.filter(c => coursIdsUtilises.has(c.id))
+    const coursFinaux = parsedBrut.cours
+      .map(c => ({ ...c, id: remapCours(c.id) }))
+      .filter(c => coursIdsUtilises.has(c.id))
 
     const coursIds = new Set(cours.map(c => c.id))
     const membreIds = new Set(membres.map(m => m.id))
