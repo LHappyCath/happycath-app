@@ -312,9 +312,58 @@ function BadgeEndossement({ reglement }) {
 }
 
 // ─── LIGNE DE RÈGLEMENT ─────────────────────────────────────────────
+function FormEditReglement({ r, onClose }) {
+  const { modifierReglement } = useData()
+  const [montant, setMontant] = useState(r.montant ?? '')
+  const [dateEncaissement, setDateEncaissement] = useState(r.date_encaissement || '')
+  const [commentaire, setCommentaire] = useState(r.commentaire || '')
+  const [saving, setSaving] = useState(false)
+  const [erreur, setErreur] = useState(null)
+
+  async function valider() {
+    setSaving(true)
+    setErreur(null)
+    const res = await modifierReglement(r.id, {
+      montant: Number(montant) || 0,
+      date_encaissement: dateEncaissement || null,
+      commentaire: commentaire || null,
+    })
+    setSaving(false)
+    if (res?.error) setErreur(res.error)
+    else onClose()
+  }
+
+  return (
+    <div style={{ background:'#f7f7f8', borderRadius:10, padding:'10px 12px', marginTop:6, display:'grid', gap:8 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+        <div>
+          <label style={{ ...LABEL, fontSize:11 }}>Montant (€)</label>
+          <input style={{ ...INPUT, padding:'6px 10px' }} type="number" step="0.01" value={montant} onChange={e=>setMontant(e.target.value)} />
+        </div>
+        <div>
+          <label style={{ ...LABEL, fontSize:11 }}>Date d'encaissement</label>
+          <input style={{ ...INPUT, padding:'6px 10px' }} type="date" value={dateEncaissement || ''} onChange={e=>setDateEncaissement(e.target.value)} />
+        </div>
+      </div>
+      <div>
+        <label style={{ ...LABEL, fontSize:11 }}>Note</label>
+        <input style={{ ...INPUT, padding:'6px 10px' }} value={commentaire} onChange={e=>setCommentaire(e.target.value)} placeholder="Commentaire libre…" />
+      </div>
+      {erreur && <p style={{ fontSize:12, color:'#D85A30', margin:0 }}>⚠ {erreur}</p>}
+      <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+        <button style={{ ...BTN.small, padding:'5px 12px' }} onClick={onClose}>Annuler</button>
+        <button style={{ ...BTN.small, padding:'5px 12px', background:'#FF0099', color:'#fff', border:'none' }} disabled={saving} onClick={valider}>
+          {saving ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function LigneReglement({ r, coursNom }) {
   const { supprimerReglement } = useData()
   const [confirm, setConfirm] = useState(false)
+  const [editing, setEditing] = useState(false)
   const isCheque = r.mode === 'Chèque'
 
   const detail = [
@@ -325,24 +374,30 @@ function LigneReglement({ r, coursNom }) {
   ].filter(Boolean).join(' · ')
 
   return (
-    <div style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:10, padding:'8px 12px', marginBottom:6, display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-      <div style={{ flex:1, minWidth:160 }}>
-        <span style={{ fontSize:13, fontWeight:500 }}>{r.payeur}</span>
-        {r.echeance_total > 1 && <span style={{ fontSize:11, color:'#888', fontWeight:400 }}> · {r.echeance_num}/{r.echeance_total}</span>}
-        <span style={{ fontSize:11, color:'#aaa' }}> — {detail}</span>
+    <div style={{ background:'#fff', border:'0.5px solid rgba(0,0,0,0.08)', borderRadius:10, padding:'8px 12px', marginBottom:6 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+        <div style={{ flex:1, minWidth:160 }}>
+          <span style={{ fontSize:13, fontWeight:500 }}>{r.payeur}</span>
+          {r.echeance_total > 1 && <span style={{ fontSize:11, color:'#888', fontWeight:400 }}> · {r.echeance_num}/{r.echeance_total}</span>}
+          <span style={{ fontSize:11, color:'#aaa' }}> — {detail}</span>
+          {r.commentaire && <div style={{ fontSize:11, color:'#aaa', fontStyle:'italic', marginTop:2 }}>📝 {r.commentaire}</div>}
+        </div>
+        <span style={{ fontSize:14, fontWeight:600, color:'#1a1a1a', whiteSpace:'nowrap' }}>{fmtEuros(r.montant)}</span>
+        {isCheque && <BadgeEndossement reglement={r} />}
+        <button onClick={()=>setEditing(v=>!v)} title="Modifier"
+          style={{ background:'none', border:'none', cursor:'pointer', color: editing ? '#FF0099' : '#ccc', fontSize:13, padding:'2px 4px' }}>✎</button>
+        {!confirm ? (
+          <button onClick={()=>setConfirm(true)} title="Supprimer"
+            style={{ background:'none', border:'none', cursor:'pointer', color:'#ddd', fontSize:14, padding:'2px 4px' }}>🗑</button>
+        ) : (
+          <span style={{ display:'flex', gap:4, alignItems:'center' }}>
+            <span style={{ fontSize:11, color:'#888' }}>Confirmer ?</span>
+            <button style={{ ...BTN.small, padding:'3px 8px', color:'#D85A30' }} onClick={()=>supprimerReglement(r.id)}>Oui</button>
+            <button style={{ ...BTN.small, padding:'3px 8px' }} onClick={()=>setConfirm(false)}>Non</button>
+          </span>
+        )}
       </div>
-      <span style={{ fontSize:14, fontWeight:600, color:'#1a1a1a', whiteSpace:'nowrap' }}>{fmtEuros(r.montant)}</span>
-      {isCheque && <BadgeEndossement reglement={r} />}
-      {!confirm ? (
-        <button onClick={()=>setConfirm(true)} title="Supprimer"
-          style={{ background:'none', border:'none', cursor:'pointer', color:'#ddd', fontSize:14, padding:'2px 4px' }}>🗑</button>
-      ) : (
-        <span style={{ display:'flex', gap:4, alignItems:'center' }}>
-          <span style={{ fontSize:11, color:'#888' }}>Confirmer ?</span>
-          <button style={{ ...BTN.small, padding:'3px 8px', color:'#D85A30' }} onClick={()=>supprimerReglement(r.id)}>Oui</button>
-          <button style={{ ...BTN.small, padding:'3px 8px' }} onClick={()=>setConfirm(false)}>Non</button>
-        </span>
-      )}
+      {editing && <FormEditReglement r={r} onClose={()=>setEditing(false)} />}
     </div>
   )
 }
