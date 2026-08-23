@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo } from 'react'
 import { useData } from '../lib/store'
-import { lireFichierSportEasy, parserCotisations, suggererMembreExistant, normName } from '../lib/sporteasyImport'
+import { lireFichierSportEasy, parserCotisations, suggererMembreExistant, suggererCoursExistant, normName } from '../lib/sporteasyImport'
 
 // Retrouve un cours déjà existant en base à partir du cours parsé depuis SportEasy
 // (nom + jour + heure), pour ne pas recréer un cours qui existe déjà sous un autre id
@@ -79,6 +79,7 @@ export default function Inscriptions() {
   const [saisonsDispo, setSaisonsDispo] = useState([])
   const [saisonsChoisies, setSaisonsChoisies] = useState([])
   const [resolutions, setResolutions] = useState({})
+  const [resolutionsCours, setResolutionsCours] = useState({})
   const [analyse, setAnalyse] = useState(null)
   const [statut, setStatut] = useState('idle')
   const [resultat, setResultat] = useState(null)
@@ -121,6 +122,17 @@ export default function Inscriptions() {
     return { nouveauxMembresBruts: nouveaux }
   }, [parsedBrut, saisonsChoisies, membres, statut])
 
+  // Cours du fichier n'ayant trouvé aucune correspondance exacte (nom+jour+heure) parmi
+  // les cours déjà en base : on demande à l'utilisateur de les lier ou de les créer.
+  const { nouveauxCoursBruts } = useMemo(() => {
+    if (!parsedBrut || (statut !== 'membres' && statut !== 'cours')) return { nouveauxCoursBruts: [] }
+    const inscriptionsFiltrees = parsedBrut.inscriptions.filter(i => saisonsChoisies.includes(i.saison))
+    const coursIdsUtilises = new Set(inscriptionsFiltrees.map(i => i.cours_id))
+    const coursUtilises = parsedBrut.cours.filter(c => coursIdsUtilises.has(c.id))
+    const nonMatches = coursUtilises.filter(c => !trouverCoursExistant(c, cours))
+    return { nouveauxCoursBruts: nonMatches }
+  }, [parsedBrut, saisonsChoisies, cours, statut])
+
   function passerAuxMembres() {
     try { localStorage.setItem(LS_KEY, JSON.stringify(saisonsChoisies)) } catch {}
     const init = {}
@@ -132,18 +144,30 @@ export default function Inscriptions() {
     setStatut('membres')
   }
 
+  function passerAuxCours() {
+    const init = {}
+    for (const c of nouveauxCoursBruts) {
+      const suggestion = suggererCoursExistant(c, cours)
+      init[c.id] = suggestion ? suggestion.id : 'nouveau'
+    }
+    setResolutionsCours(init)
+    setStatut('cours')
+  }
+
   function calculerAnalyseFinale() {
     const inscriptionsFiltrees = parsedBrut.inscriptions.filter(i => saisonsChoisies.includes(i.saison))
     const reglementsFiltres = parsedBrut.reglements.filter(r => saisonsChoisies.includes(r.saison))
     const remap = (mid) => (resolutions[mid] && resolutions[mid] !== 'nouveau') ? resolutions[mid] : mid
 
-    // Rattache chaque cours parsé du fichier à un cours déjà existant (nom + jour + heure) :
-    // si trouvé, on réutilise son id réel au lieu de l'id généré par l'import, pour ne pas
-    // recréer un cours qui existe déjà.
+    // Rattache chaque cours parsé du fichier à un cours déjà existant : d'abord par
+    // correspondance exacte (nom + jour + heure), sinon par le choix fait à l'étape "cours"
+    // (lien manuel ou création volontaire d'un nouveau cours).
     const remapCoursId = {}
     for (const c of parsedBrut.cours) {
       const existant = trouverCoursExistant(c, cours)
-      if (existant) remapCoursId[c.id] = existant.id
+      if (existant) { remapCoursId[c.id] = existant.id; continue }
+      const choix = resolutionsCours[c.id]
+      if (choix && choix !== 'nouveau') remapCoursId[c.id] = choix
     }
     const remapCours = (cid) => remapCoursId[cid] || cid
 
@@ -187,7 +211,7 @@ export default function Inscriptions() {
 
   function reinitialiser() {
     setFichier(null); setParsedBrut(null); setAnalyse(null); setStatut('idle')
-    setResultat(null); setErreur(null); setResolutions({})
+    setResultat(null); setErreur(null); setResolutions({}); setResolutionsCours({})
     if (inputRef.current) inputRef.current.value = ''
   }
 
@@ -250,7 +274,7 @@ export default function Inscriptions() {
             {nouveauxMembresBruts.length === 0 ? (
               <div>
                 <p style={{ fontSize:14, color:'#888', marginBottom:16 }}>Aucun nouveau nom dans les saisons choisies — tout correspond déjà à des membres existants.</p>
-                <button style={BTN.primary} onClick={calculerAnalyseFinale}>Continuer →</button>
+                <button style={BTN.primary} onClick={passerAuxCours}>Continuer →</button>
               </div>
             ) : (
               <div>
@@ -276,6 +300,48 @@ export default function Inscriptions() {
                 </div>
                 <div style={{ display:'flex', gap:10 }}>
                   <button style={BTN.ghost} onClick={()=>setStatut('saisons')}>← Retour</button>
+                  <button style={BTN.primary} onClick={passerAuxCours}>Valider ces choix →</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {statut === 'cours' && (
+          <div>
+            {nouveauxCoursBruts.length === 0 ? (
+              <div>
+                <p style={{ fontSize:14, color:'#888', marginBottom:16 }}>Aucun nouveau cours dans les saisons choisies — tout correspond déjà à des cours existants.</p>
+                <button style={BTN.primary} onClick={calculerAnalyseFinale}>Continuer →</button>
+              </div>
+            ) : (
+              <div>
+                <p style={{ fontSize:14, fontWeight:500, marginBottom:4 }}>Vérifie chaque nouveau cours ({nouveauxCoursBruts.length})</p>
+                <p style={{ fontSize:12, color:'#888', marginBottom:14 }}>Pour chacun : c'est un cours déjà existant (créneau renommé/déplacé), ou un vrai nouveau cours ?</p>
+                <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:16, maxHeight:420, overflowY:'auto' }}>
+                  {nouveauxCoursBruts.map(c => (
+                    <div key={c.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'#f7f7f8', borderRadius:10, flexWrap:'wrap' }}>
+                      <span style={{ fontWeight:500, minWidth:220 }}>{c.nom} — {parsedBrut.joursNoms[c.jour]} {c.heure}</span>
+                      <select
+                        style={{ ...INPUT, padding:'6px 10px', flex:1, minWidth:220 }}
+                        value={resolutionsCours[c.id] || 'nouveau'}
+                        onChange={e => setResolutionsCours(prev => ({ ...prev, [c.id]: e.target.value }))}
+                      >
+                        <option value="nouveau">➕ Créer comme nouveau cours</option>
+                        {cours.map(cx => (
+                          <option key={cx.id} value={cx.id}>
+                            🔗 Lier à : {cx.nom} — {parsedBrut.joursNoms[cx.jour]} {cx.heure}{!cx.actif ? ' (archivé)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {resolutionsCours[c.id] && resolutionsCours[c.id] !== 'nouveau' && (
+                        <span style={{ fontSize:11, color:'#1D9E75' }}>suggestion</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display:'flex', gap:10 }}>
+                  <button style={BTN.ghost} onClick={()=>setStatut('membres')}>← Retour</button>
                   <button style={BTN.primary} onClick={calculerAnalyseFinale}>Valider ces choix →</button>
                 </div>
               </div>
@@ -295,7 +361,7 @@ export default function Inscriptions() {
               <p style={{ fontSize:14, color:'#888' }}>Rien de nouveau à importer — tout est déjà à jour ✅</p>
             ) : (
               <div style={{ display:'flex', gap:10 }}>
-                <button style={BTN.ghost} onClick={()=>setStatut('membres')}>← Retour</button>
+                <button style={BTN.ghost} onClick={()=>setStatut('cours')}>← Retour</button>
                 <button style={BTN.primary} onClick={confirmer}>Valider l'import</button>
               </div>
             )}
