@@ -179,8 +179,57 @@ function Planning({ cours, inscriptions, onStartAppel, onVoirHistorique, onEditC
 }
 
 // ─── ÉCRAN APPEL ────────────────────────────────────────────────
+// Devine ce qu'un membre a réglé pour CE cours sur la saison active, en comparant la somme de
+// ses règlements aux tarifs du cours (Annuel, Semestriel, Trimestriel, à la séance). Le "tarif
+// réduit" (-10% de l'Annuel) n'a pas encore de case dédiée dans l'appli : on le détecte par
+// proximité de montant, comme les autres périodicités. Tolérance : 3% ou 2€ (le plus grand).
+function statutPaiement(membreId, coursObj, tarifs, reglements, saisonActive) {
+  const montantRegle = reglements
+    .filter(r => r.membre_id === membreId && r.cours_id === coursObj.id && r.saison === saisonActive && r.statut !== 'rejete')
+    .reduce((s, r) => s + Number(r.montant || 0), 0)
+
+  if (montantRegle <= 0) return { label: 'Rien réglé', niveau: 'rien' }
+
+  const trouve = (periodicite) => tarifs.find(t => t.cours_id === coursObj.id && t.saison === saisonActive && t.periodicite === periodicite)
+  const tarifAnnuel = trouve('Annuel')?.montant ?? coursObj.tarif_plein ?? null
+  const tarifSemestriel = trouve('Semestriel')?.montant ?? null
+  const tarifTrimestriel = trouve('Trimestriel')?.montant ?? null
+  const tarifSeance = trouve('Heure')?.montant ?? null
+
+  const candidats = [
+    tarifAnnuel && { label: 'Annuel', montant: tarifAnnuel },
+    tarifAnnuel && { label: 'Tarif réduit (-10%)', montant: tarifAnnuel * 0.9 },
+    tarifSemestriel && { label: 'Semestriel', montant: tarifSemestriel },
+    tarifTrimestriel && { label: 'Trimestriel', montant: tarifTrimestriel },
+  ].filter(Boolean)
+
+  let meilleur = null, meilleurEcart = Infinity
+  for (const c of candidats) {
+    const tolerance = Math.max(2, c.montant * 0.03)
+    const ecart = Math.abs(montantRegle - c.montant)
+    if (ecart <= tolerance && ecart < meilleurEcart) { meilleur = c; meilleurEcart = ecart }
+  }
+  if (meilleur) return { label: meilleur.label, niveau: 'complet' }
+
+  if (tarifSeance > 0) {
+    const nb = montantRegle / tarifSeance
+    if (Math.abs(nb - Math.round(nb)) <= 0.05 && Math.round(nb) >= 1) {
+      const n = Math.round(nb)
+      return { label: `${n} séance${n>1?'s':''}`, niveau: 'partiel' }
+    }
+  }
+
+  return { label: `Partiel (${fmtEuros(montantRegle)})`, niveau: 'partiel' }
+}
+
+const COULEURS_PAIEMENT = {
+  complet: { bg:'rgba(29,158,117,0.12)', color:'#1D9E75' },
+  partiel: { bg:'rgba(186,117,23,0.12)', color:'#BA7517' },
+  rien: { bg:'rgba(216,90,48,0.12)', color:'#D85A30' },
+}
+
 function EcranAppel({ cours, onValider, onAnnuler, appelExistant }) {
-  const { inscritsDuCours, membres, online, historique } = useData()
+  const { inscritsDuCours, membres, online, historique, tarifs, reglements, saisonActive } = useData()
   const today = new Date().toISOString().split('T')[0]
   const [date, setDate] = useState(appelExistant?.date || today)
   const inscrits = inscritsDuCours(cours.id)
@@ -312,13 +361,19 @@ function EcranAppel({ cours, onValider, onAnnuler, appelExistant }) {
           const labelColor = estPresent ? '#FF0099' : estAbsent ? '#E24B4A' : '#ddd'
           const label = estPresent ? 'Présent' : estAbsent ? 'Absent' : '—'
 
+          const paiement = statutPaiement(m.id, cours, tarifs, reglements, saisonActive)
+          const couleurPaiement = COULEURS_PAIEMENT[paiement.niveau]
+
           return (
             <div key={m.id} onClick={()=>cycleStatut(m.id)}
-              style={{ background:bg, border:`1.5px solid ${border}`, borderRadius:12, padding:'11px 14px', display:'flex', alignItems:'center', gap:12, cursor:'pointer', userSelect:'none', transition:'all .15s' }}>
+              style={{ background:bg, border:`1.5px solid ${border}`, borderRadius:12, padding:'11px 14px', display:'flex', alignItems:'center', gap:12, cursor:'pointer', userSelect:'none', transition:'all .15s', flexWrap:'wrap' }}>
               <div style={{ width:38, height:38, borderRadius:'50%', background:avatarBg, color:avatarColor, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:500, flexShrink:0, transition:'all .15s' }}>
                 {avatarContent}
               </div>
-              <span style={{ flex:1, fontSize:14, fontWeight:estPresent?500:400 }}>{m.nom}</span>
+              <span style={{ flex:1, fontSize:14, fontWeight:estPresent?500:400, minWidth:100 }}>{m.nom}</span>
+              <span style={{ fontSize:10, fontWeight:500, padding:'3px 8px', borderRadius:6, background:couleurPaiement.bg, color:couleurPaiement.color, whiteSpace:'nowrap' }}>
+                {paiement.label}
+              </span>
               <span style={{ fontSize:12, fontWeight:500, color:labelColor }}>{label}</span>
             </div>
           )

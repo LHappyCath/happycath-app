@@ -9,6 +9,17 @@ const JOURS_FULL = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Sa
 function initiales(nom) { return (nom||'').split(' ').map(p=>p[0]).join('').toUpperCase().slice(0,2) }
 function couleur(id) { let h=0; for(let c of (id||'')) h=(h*31+c.charCodeAt(0))%COULEURS.length; return COULEURS[h] }
 
+// Le champ "abonnement" stocké sur le membre n'est qu'un texte figé au moment où sa fiche a
+// été enregistrée manuellement (Modifier > Enregistrer) — les membres créés par import (ou dont
+// les inscriptions ont changé depuis) n'ont jamais ce texte à jour. On calcule donc la liste des
+// cours suivis en direct depuis les inscriptions, plutôt que de faire confiance à ce champ.
+function coursNomsDeMembre(membreId, cours, inscriptions) {
+  return cours
+    .filter(c => inscriptions.some(i => i.membre_id === membreId && i.cours_id === c.id))
+    .map(c => c.nom)
+    .join(' · ')
+}
+
 const BTN = {
   primary: { padding:'9px 18px', borderRadius:8, border:'none', background:'#FF0099', color:'#fff', cursor:'pointer', fontSize:14, fontWeight:500 },
   ghost: { padding:'9px 18px', borderRadius:8, border:'0.5px solid rgba(0,0,0,0.15)', background:'transparent', color:'#666', cursor:'pointer', fontSize:14 },
@@ -224,7 +235,7 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver, onSupprimerDefinitif
               <span style={{ marginLeft:8, fontSize:11, fontWeight:500, color:'#888', background:'#eee', borderRadius:12, padding:'2px 8px', verticalAlign:'middle' }}>Archivé</span>
             )}
           </h2>
-          <p style={{ fontSize:13, color:'#888', margin:0 }}>{membre.abonnement||'Pas de cours'}</p>
+          <p style={{ fontSize:13, color:'#888', margin:0 }}>{coursNomsDeMembre(membre.id, cours, inscriptions) || 'Pas de cours'}</p>
         </div>
         <div style={{ display:'flex', gap:6 }}>
           <button onClick={onEdit} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px' }}>Modifier</button>
@@ -602,7 +613,7 @@ export default function Membres() {
 
   const filtered = base.filter(m => {
     const s = search.toLowerCase()
-    return !s || m.nom.toLowerCase().includes(s) || (m.abonnement||'').toLowerCase().includes(s)
+    return !s || m.nom.toLowerCase().includes(s) || coursNomsDeMembre(m.id, cours, inscriptions).toLowerCase().includes(s)
   })
 
   if (vue === 'fiche' && selected) {
@@ -637,7 +648,7 @@ export default function Membres() {
 
       <div className="stats-grid">
         <div className="stat-card"><div className="stat-val" style={{ color:'#FF0099' }}>{membresActifs.length}</div><div className="stat-lbl">Membres actifs</div></div>
-        <div className="stat-card"><div className="stat-val">{membresActifs.filter(m=>m.abonnement).length}</div><div className="stat-lbl">Avec abonnement</div></div>
+        <div className="stat-card"><div className="stat-val">{membresActifs.filter(m=>inscriptions.some(i=>i.membre_id===m.id)).length}</div><div className="stat-lbl">Avec abonnement</div></div>
         <div className="stat-card"><div className="stat-val" style={{ color: !online?'#888':'#1a1a1a' }}>{online?'En ligne':'Hors ligne'}</div><div className="stat-lbl">Statut réseau</div></div>
       </div>
 
@@ -688,7 +699,7 @@ export default function Membres() {
                   <p style={{ fontSize:11, color:'#aaa', margin:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                     {voirArchives === 'non-renouveles'
                       ? `${saisonPrecedente} : ${inscriptions.filter(i=>i.membre_id===m.id&&i.saison===saisonPrecedente).map(i=>cours.find(c=>c.id===i.cours_id)?.nom).filter(Boolean).join(', ') || '—'}`
-                      : (m.abonnement||'Aucun cours')}
+                      : (coursNomsDeMembre(m.id, cours, inscriptions) || 'Aucun cours')}
                   </p>
                 </div>
               </div>
