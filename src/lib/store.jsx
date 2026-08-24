@@ -1516,7 +1516,7 @@ export function DataProvider({ children }) {
     // Utilitaires
     coursSupprimable: (id) => !coursALaHistorique(id),
     membreSupprimable: (id) => !membreALaHistorique(id),
-    inscritsDuCours: (coursId) => membres.filter(m => inscriptions.some(i => i.cours_id === coursId && i.membre_id === m.id)).sort((a,b) => a.nom.localeCompare(b.nom)),
+    inscritsDuCours: (coursId, saison = saisonActive) => membres.filter(m => inscriptions.some(i => i.cours_id === coursId && i.membre_id === m.id && i.saison === saison)).sort((a,b) => a.nom.localeCompare(b.nom)),
     coursDuMembre: (membreId) => cours.filter(c => inscriptions.some(i => i.membre_id === membreId && i.cours_id === c.id)),
     appelsDuCours: (coursId) => historique.filter(h => h.cours_id === coursId).sort((a,b) => b.date.localeCompare(a.date)),
     appelsDuMembre: (membreId) => historique.filter(h => (h.presents||[]).includes(membreId) || (h.guests||[]).some(g => g.membreId === membreId)),
