@@ -115,17 +115,16 @@ export function parserCotisations(rows) {
     lignes.push({ ...r, _cours: parsed, _personnes: splitPersonnes(r['Payé pour']) })
   }
 
-  // Saison : texte explicite sinon année scolaire de la 1ère date du groupe
-  const groupes = {}
-  for (const l of lignes) {
-    const key = l['Payé pour'] + '||' + l['Collecte']
-    const d = l['Date'] instanceof Date ? l['Date'] : new Date(l['Date'])
-    if (!groupes[key] || d < groupes[key]) groupes[key] = d
-  }
+  // Saison : texte explicite dans la collecte, sinon année scolaire de la date DE CHAQUE
+  // paiement. (Avant, la saison venait de la 1ère date du groupe "Payé pour + Collecte" ;
+  // or ce libellé est identique d'une année sur l'autre pour un même cours, donc deux saisons
+  // fusionnaient et le renouvellement de l'année en cours était rangé dans la saison
+  // précédente. Résultat : les membres qui se réinscrivaient au même cours "disparaissaient"
+  // de la nouvelle saison. On calcule donc la saison paiement par paiement.)
   for (const l of lignes) {
     const m = String(l['Collecte']).match(/(20\d{2})-(20\d{2})/)
-    const key = l['Payé pour'] + '||' + l['Collecte']
-    l._saison = m ? `${m[1]}-${m[2]}` : academicSeason(groupes[key])
+    const d = l['Date'] instanceof Date ? l['Date'] : new Date(l['Date'])
+    l._saison = m ? `${m[1]}-${m[2]}` : academicSeason(d)
   }
 
   // Cours distincts
@@ -163,7 +162,7 @@ export function parserCotisations(rows) {
   const cheques = lignes.filter(l => l['Moyen de paiement'] === 'Chèque')
   const chequesParDesc = {}
   for (const l of cheques) {
-    const key = l['Description'] || ''
+    const key = (l['Description'] || '') + '||' + l._saison
     if (!chequesParDesc[key]) chequesParDesc[key] = []
     chequesParDesc[key].push(l)
   }
@@ -191,7 +190,9 @@ export function parserCotisations(rows) {
   const carte = lignes.filter(l => l['Moyen de paiement'] === 'Carte')
   const carteParGroupe = {}
   for (const l of carte) {
-    const key = l['Payé pour'] + '||' + l['Collecte']
+    // La saison fait partie de la clé : deux paiements du même cours à un an d'écart
+    // ne doivent pas être comptés comme des échéances d'un même plan (n° d'échéance faussé).
+    const key = l['Payé pour'] + '||' + l['Collecte'] + '||' + l._saison
     if (!carteParGroupe[key]) carteParGroupe[key] = []
     carteParGroupe[key].push(l)
   }
