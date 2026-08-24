@@ -12,13 +12,16 @@ permissions:
   pages: write
   id-token: write
 
+# Un seul déploiement Pages à la fois : les runs se mettent en file au lieu
+# de se percuter (règle la collision "in progress deployment").
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
-  deploy:
+  build:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,9 +33,20 @@ jobs:
           REACT_APP_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           REACT_APP_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: npm run build
+      # UNE seule fois, et uniquement dans le job build.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./build
+
+  deploy:
+    if: github.event_name != 'schedule'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # Ne fait QUE déployer : re-lancer ce job ne crée plus d'artefact en double.
       - id: deployment
         uses: actions/deploy-pages@v4
 
