@@ -165,8 +165,11 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver, onSupprimerDefinitif
   const saisonsDisponibles = useMemo(() => {
     const s1 = historique.map(h => h.saison)
     const s2 = reglements.filter(r => r.membre_id === membre.id).map(r => r.saison)
-    return [...new Set([...s1, ...s2].filter(Boolean))].sort().reverse()
-  }, [historique, reglements, membre.id])
+    const s3 = inscriptions.filter(i => i.membre_id === membre.id).map(i => i.saison)
+    // On ajoute toujours la saison active : un membre importé (juste une inscription, pas encore
+    // d'appel ni de règlement rattaché) doit pouvoir être consulté sur la saison en cours.
+    return [...new Set([saisonActive, ...s1, ...s2, ...s3].filter(Boolean))].sort().reverse()
+  }, [historique, reglements, inscriptions, membre.id, saisonActive])
 
   const reglementsMembre = useMemo(() => {
     return reglements.filter(r => r.membre_id === membre.id && (filtreSaison === 'Toutes' || r.saison === filtreSaison))
