@@ -20,6 +20,14 @@ function coursNomsDeMembre(membreId, cours, inscriptions) {
     .join(' · ')
 }
 
+// Même chose, mais restreint à une saison donnée (pour la liste filtrable par saison).
+function coursNomsDeMembreSaison(membreId, saison, cours, inscriptions) {
+  return cours
+    .filter(c => inscriptions.some(i => i.membre_id === membreId && i.cours_id === c.id && i.saison === saison))
+    .map(c => c.nom)
+    .join(' · ')
+}
+
 const BTN = {
   primary: { padding:'9px 18px', borderRadius:8, border:'none', background:'#FF0099', color:'#fff', cursor:'pointer', fontSize:14, fontWeight:500 },
   ghost: { padding:'9px 18px', borderRadius:8, border:'0.5px solid rgba(0,0,0,0.15)', background:'transparent', color:'#666', cursor:'pointer', fontSize:14 },
@@ -156,11 +164,11 @@ function FormMembre({ initial, onSave, onClose }) {
 }
 
 // ─── FICHE MEMBRE ───────────────────────────────────────────────
-function FicheMembre({ membre, onClose, onEdit, onArchiver, onSupprimerDefinitif }) {
+function FicheMembre({ membre, onClose, onEdit, onArchiver, onSupprimerDefinitif, saisonInitiale }) {
   const { cours, inscriptions, historique, reglements, online, reactiverMembre, membreSupprimable, saisonActive } = useData()
   const [stats, setStats] = useState(null)
   const [sessions, setSessions] = useState([])
-  const [filtreSaison, setFiltreSaison] = useState(saisonActive)
+  const [filtreSaison, setFiltreSaison] = useState(saisonInitiale || saisonActive)
 
   const saisonsDisponibles = useMemo(() => {
     const s1 = historique.map(h => h.saison)
@@ -566,6 +574,8 @@ export default function Membres() {
   const [toast, setToast] = useState(null)
   const [voirArchives, setVoirArchives] = useState(false)
   const [showImportRoster, setShowImportRoster] = useState(false)
+  const [filtreSaisonListe, setFiltreSaisonListe] = useState(saisonActive)
+  const [filtreCours, setFiltreCours] = useState('tous') // 'tous' | 'sans' | cours_id
 
   const selected = membres.find(m => m.id === selectedId) || null
 
@@ -599,30 +609,33 @@ export default function Membres() {
   const membresActifs = membres.filter(m => m.actif !== false)
   const membresArchives = membres.filter(m => m.actif === false)
 
-  const saisonPrecedente = useMemo(() => {
-    const [a, b] = saisonActive.split('-').map(Number)
-    return `${a-1}-${b-1}`
-  }, [saisonActive])
+  const saisonsListe = useMemo(() => {
+    const s = [...new Set(inscriptions.map(i => i.saison).filter(Boolean))]
+    if (!s.includes(saisonActive)) s.push(saisonActive)
+    return s.sort().reverse()
+  }, [inscriptions, saisonActive])
 
-  const membresNonRenouveles = useMemo(() => {
-    return membresActifs.filter(m => {
-      const inscritAvant = inscriptions.some(i => i.membre_id === m.id && i.saison === saisonPrecedente)
-      const inscritCetteAnnee = inscriptions.some(i => i.membre_id === m.id && i.saison === saisonActive)
-      return inscritAvant && !inscritCetteAnnee
-    })
-  }, [membresActifs, inscriptions, saisonPrecedente, saisonActive])
+  // Cours ayant au moins une inscription dans la saison choisie (alimente le filtre par cours)
+  const coursDeLaSaison = useMemo(() => {
+    const ids = new Set(inscriptions.filter(i => i.saison === filtreSaisonListe).map(i => i.cours_id))
+    return cours.filter(c => ids.has(c.id)).sort((a,b) => a.nom.localeCompare(b.nom))
+  }, [cours, inscriptions, filtreSaisonListe])
 
-  const base = voirArchives === 'non-renouveles' ? membresNonRenouveles : voirArchives === true ? membresArchives : membresActifs
+  const base = voirArchives === true ? membresArchives : membresActifs
 
-  const filtered = base.filter(m => {
+  const filtered = useMemo(() => base.filter(m => {
+    const insSaison = inscriptions.filter(i => i.membre_id === m.id && i.saison === filtreSaisonListe)
+    if (filtreCours === 'sans') { if (insSaison.length > 0) return false }
+    else if (filtreCours !== 'tous') { if (!insSaison.some(i => i.cours_id === filtreCours)) return false }
     const s = search.toLowerCase()
-    return !s || m.nom.toLowerCase().includes(s) || coursNomsDeMembre(m.id, cours, inscriptions).toLowerCase().includes(s)
-  })
+    if (s && !m.nom.toLowerCase().includes(s) && !coursNomsDeMembreSaison(m.id, filtreSaisonListe, cours, inscriptions).toLowerCase().includes(s)) return false
+    return true
+  }), [base, inscriptions, filtreSaisonListe, filtreCours, search, cours])
 
   if (vue === 'fiche' && selected) {
     return (
       <div>
-        <FicheMembre membre={selected}
+        <FicheMembre membre={selected} key={selected.id} saisonInitiale={filtreSaisonListe}
           onClose={()=>{setVue('liste');setSelectedId(null)}}
           onEdit={()=>setModal(selected)}
           onArchiver={()=>archiver(selected)}
@@ -651,11 +664,11 @@ export default function Membres() {
 
       <div className="stats-grid">
         <div className="stat-card"><div className="stat-val" style={{ color:'#FF0099' }}>{membresActifs.length}</div><div className="stat-lbl">Membres actifs</div></div>
-        <div className="stat-card"><div className="stat-val">{membresActifs.filter(m=>inscriptions.some(i=>i.membre_id===m.id)).length}</div><div className="stat-lbl">Avec abonnement</div></div>
+        <div className="stat-card"><div className="stat-val">{membresActifs.filter(m=>inscriptions.some(i=>i.membre_id===m.id&&i.saison===filtreSaisonListe)).length}</div><div className="stat-lbl">Inscrits {filtreSaisonListe}</div></div>
         <div className="stat-card"><div className="stat-val" style={{ color: !online?'#888':'#1a1a1a' }}>{online?'En ligne':'Hors ligne'}</div><div className="stat-lbl">Statut réseau</div></div>
       </div>
 
-      <div style={{ display:'flex', gap:8, marginBottom:14, flexWrap:'wrap' }}>
+      <div style={{ display:'flex', gap:8, marginBottom:10, flexWrap:'wrap' }}>
         <button
           onClick={()=>setVoirArchives(false)}
           style={{ ...BTN.ghost, ...(voirArchives===false ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>
@@ -666,15 +679,24 @@ export default function Membres() {
           style={{ ...BTN.ghost, ...(voirArchives===true ? { background:'#1a1a1a', color:'#fff', border:'none' } : {}) }}>
           Archivés ({membresArchives.length})
         </button>
-        <button
-          onClick={()=>setVoirArchives('non-renouveles')}
-          style={{ ...BTN.ghost, ...(voirArchives==='non-renouveles' ? { background:'#D85A30', color:'#fff', border:'none' } : { color:'#D85A30' }) }}>
-          Non renouvelés {saisonActive} ({membresNonRenouveles.length})
-        </button>
+      </div>
+
+      <div style={{ display:'flex', gap:8, marginBottom:12, flexWrap:'wrap', alignItems:'center' }}>
+        <select value={filtreSaisonListe} onChange={e=>{ setFiltreSaisonListe(e.target.value); setFiltreCours('tous') }}
+          style={{ ...INPUT, width:'auto', margin:0 }}>
+          {saisonsListe.map(s => <option key={s} value={s}>{s}{s===saisonActive?' (active)':''}</option>)}
+        </select>
+        <select value={filtreCours} onChange={e=>setFiltreCours(e.target.value)}
+          style={{ ...INPUT, flex:1, minWidth:160, margin:0 }}>
+          <option value="tous">Tous les cours</option>
+          <option value="sans">Sans cours</option>
+          {coursDeLaSaison.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
+        </select>
       </div>
 
       <input type="text" placeholder="Rechercher un membre…" value={search} onChange={e=>setSearch(e.target.value)}
-        style={{ ...INPUT, marginBottom:12 }} />
+        style={{ ...INPUT, marginBottom:8 }} />
+      <p style={{ fontSize:12, color:'#aaa', margin:'0 0 10px 2px' }}>{filtered.length} membre{filtered.length>1?'s':''} · {filtreSaisonListe}</p>
 
       <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 80px 60px', gap:8, padding:'0 14px 6px', fontSize:11, color:'#aaa', fontWeight:500 }}>
@@ -700,9 +722,7 @@ export default function Membres() {
                 <div style={{ minWidth:0 }}>
                   <p style={{ fontSize:14, fontWeight:500, margin:'0 0 1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.nom}</p>
                   <p style={{ fontSize:11, color:'#aaa', margin:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                    {voirArchives === 'non-renouveles'
-                      ? `${saisonPrecedente} : ${inscriptions.filter(i=>i.membre_id===m.id&&i.saison===saisonPrecedente).map(i=>cours.find(c=>c.id===i.cours_id)?.nom).filter(Boolean).join(', ') || '—'}`
-                      : (coursNomsDeMembre(m.id, cours, inscriptions) || 'Aucun cours')}
+                    {coursNomsDeMembreSaison(m.id, filtreSaisonListe, cours, inscriptions) || `Aucun cours en ${filtreSaisonListe}`}
                   </p>
                 </div>
               </div>
