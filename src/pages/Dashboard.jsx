@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useData } from '../lib/store'
 
@@ -48,10 +48,21 @@ function KpiCard({ val, lbl, color, onClick }) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { cours: storeC, membres: storeM, inscriptions: storeI, historique: storeH, abonnements: storeA, loading: storeLoading } = useData()
+  const { cours: storeC, membres: storeM, inscriptions: storeI, historique: storeH, abonnements: storeA, loading: storeLoading, saisonActive } = useData()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(null)
+  const [filtreSaison, setFiltreSaison] = useState(saisonActive)
+
+  const saisonsDisponibles = useMemo(() => {
+    const s = new Set([
+      ...(storeI||[]).map(i=>i.saison),
+      ...(storeH||[]).map(h=>h.saison),
+      ...(storeA||[]).map(a=>a.saison),
+    ].filter(Boolean))
+    s.add(saisonActive)
+    return [...s].sort().reverse()
+  }, [storeI, storeH, storeA, saisonActive])
 
   const [coursSort, setCoursSort] = useState({ col:'nom', dir:'asc' })
   const [membresSort, setMembresSort] = useState({ col:'nom', dir:'asc' })
@@ -62,8 +73,15 @@ export default function Dashboard() {
   const CACHE_KEY = 'happycath_dashboard_cache'
 
   const loadDashboard = useCallback(async () => {
-    const membres = storeM, cours = storeC, inscriptions = storeI, historique = storeH, abonnements = storeA
-    if (!membres.length && !cours.length) {
+    const cours = storeC
+    const inscriptions = (storeI || []).filter(i => i.saison === filtreSaison)
+    const historique = (storeH || []).filter(h => h.saison === filtreSaison)
+    const abonnements = (storeA || []).filter(a => a.saison === filtreSaison)
+    // Seuls les membres inscrits à au moins un cours cette saison-là sont affichés — un
+    // "tableau de bord" par saison n'a pas de sens pour quelqu'un qui n'y était pas inscrit.
+    const membres = (storeM || []).filter(m => inscriptions.some(i => i.membre_id === m.id))
+
+    if (!storeM.length && !cours.length) {
       try {
         const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null')
         if (cached) { setData(cached); setLoading(false); return }
@@ -144,7 +162,7 @@ export default function Dashboard() {
     try { localStorage.setItem(CACHE_KEY, JSON.stringify(result)) } catch(e) {}
     setData(result)
     setLoading(false)
-  }, [])
+  }, [storeM, storeC, storeH, storeI, storeA, filtreSaison])
 
   useEffect(() => { 
     if (!storeLoading) loadDashboard() 
@@ -188,7 +206,10 @@ export default function Dashboard() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Tableau de bord</h1>
-          <p style={{ fontSize:13, color:'#888', marginTop:2 }}>Saison 2025/2026</p>
+          <select value={filtreSaison} onChange={e=>setFiltreSaison(e.target.value)}
+            style={{ marginTop:4, padding:'5px 10px', borderRadius:8, border:'0.5px solid rgba(0,0,0,0.15)', fontSize:13, background:'#fff', color:'#666', fontWeight:500, cursor:'pointer' }}>
+            {saisonsDisponibles.map(s => <option key={s} value={s}>Saison {s}{s===saisonActive ? ' (active)' : ''}</option>)}
+          </select>
         </div>
         <div style={{ display:'flex', gap:8 }}>
           <button onClick={() => setModal('fin_saison')} style={{ padding:'7px 14px', borderRadius:8, border:'0.5px solid rgba(0,0,0,0.15)', background:'transparent', color:'#666', cursor:'pointer', fontSize:13 }}>Fin de saison</button>
