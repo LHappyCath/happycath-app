@@ -48,41 +48,15 @@ function Modal({ titre, onClose, children }) {
   )
 }
 
-// ─── ABONNEMENT INFO ────────────────────────────────────────────
-function AboInfo({ membreId }) {
-  const { abonnements, saisonActive } = useData()
-  const abo = abonnements.find(a=>a.membre_id===membreId&&a.saison===saisonActive&&a.statut==='actif')
-  if (!abo) return null
-  const debut = abo.date_debut ? new Date(abo.date_debut+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'}) : '—'
-  const fin = abo.date_fin ? new Date(abo.date_fin+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'}) : '—'
-  return (
-    <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-      <span style={{ fontSize:12, fontWeight:500, padding:'3px 10px', borderRadius:8, background:'rgba(255,0,153,0.1)', color:'#FF0099' }}>{abo.type}</span>
-      <span style={{ fontSize:12, color:'#888' }}>{debut} → {fin}</span>
-      {abo.montant && <span style={{ fontSize:12, color:'#888' }}>· {Number(abo.montant).toLocaleString('fr-FR')} €</span>}
-    </div>
-  )
-}
-
 // ─── FORMULAIRE MEMBRE ──────────────────────────────────────────
 function FormMembre({ initial, onSave, onClose }) {
-  const { cours, inscriptions, sauvegarderMembre, sauvegarderInscriptions, sauvegarderAbonnement, abonnements, saisonActive } = useData()
+  const { cours, inscriptions, sauvegarderMembre, sauvegarderInscriptions, saisonActive } = useData()
   const [form, setForm] = useState(initial || { nom:'', telephone:'', email:'', notes:'' })
   const [inscrits, setInscrits] = useState(
-    initial ? inscriptions.filter(i=>i.membre_id===initial.id).map(i=>i.cours_id) : []
+    initial ? inscriptions.filter(i=>i.membre_id===initial.id && i.saison===saisonActive).map(i=>i.cours_id) : []
   )
-  const [abo, setAbo] = useState({ type:'Annuel', date_debut:'', date_fin:'', montant:'' })
   const [saving, setSaving] = useState(false)
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
-
-  useEffect(() => {
-    if (initial?.id) {
-      const aboActif = abonnements.find(a=>a.membre_id===initial.id&&a.saison===saisonActive&&a.statut==='actif')
-      if (aboActif) setAbo({ type:aboActif.type, date_debut:aboActif.date_debut||'', date_fin:aboActif.date_fin||'', montant:aboActif.montant||'' })
-    }
-  }, [initial?.id, abonnements, saisonActive])
-
-  const datesFin = { 'Annuel':'2026-07-31','Semestriel':'2026-01-31','T1':'2025-12-31','T2':'2026-03-31','T3':'2026-07-31','Seance':'' }
 
   async function save() {
     if (!form.nom.trim()) return
@@ -91,7 +65,6 @@ function FormMembre({ initial, onSave, onClose }) {
     const abonnement = cours.filter(c=>inscrits.includes(c.id)).map(c=>c.nom).join(' · ')
     await sauvegarderMembre({ id, ...form, abonnement })
     await sauvegarderInscriptions(id, inscrits)
-    if (abo.date_debut) await sauvegarderAbonnement(id, abo)
     setSaving(false)
     onSave()
   }
@@ -111,31 +84,8 @@ function FormMembre({ initial, onSave, onClose }) {
           <input style={INPUT} value={form.email||''} onChange={e=>set('email',e.target.value)} placeholder="@" /></div>
       </div>
 
-      <div style={{ background:'#f8f8f8', borderRadius:10, padding:12 }}>
-        <label style={{ fontSize:12, color:'#888', display:'block', marginBottom:8, fontWeight:500 }}>Abonnement 2025/2026</label>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
-          <div><label style={{ fontSize:11, color:'#aaa', display:'block', marginBottom:4 }}>Type</label>
-            <select style={INPUT} value={abo.type} onChange={e=>{const t=e.target.value;setAbo(a=>({...a,type:t,date_debut:a.date_debut||'2025-09-01',date_fin:datesFin[t]||a.date_fin}))}}>
-              <option value="Annuel">Annuel</option>
-              <option value="Semestriel">Semestriel</option>
-              <option value="T1">Trimestre 1 (sept–déc)</option>
-              <option value="T2">Trimestre 2 (janv–mars)</option>
-              <option value="T3">Trimestre 3 (avr–juil)</option>
-              <option value="Seance">À la séance</option>
-            </select></div>
-          <div><label style={{ fontSize:11, color:'#aaa', display:'block', marginBottom:4 }}>Montant (€)</label>
-            <input style={INPUT} type="number" value={abo.montant||''} onChange={e=>setAbo(a=>({...a,montant:e.target.value}))} placeholder="335" /></div>
-        </div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-          <div><label style={{ fontSize:11, color:'#aaa', display:'block', marginBottom:4 }}>Début</label>
-            <input style={INPUT} type="date" value={abo.date_debut||''} onChange={e=>setAbo(a=>({...a,date_debut:e.target.value}))} /></div>
-          <div><label style={{ fontSize:11, color:'#aaa', display:'block', marginBottom:4 }}>Fin</label>
-            <input style={INPUT} type="date" value={abo.date_fin||''} onChange={e=>setAbo(a=>({...a,date_fin:e.target.value}))} /></div>
-        </div>
-      </div>
-
       <div>
-        <label style={{ fontSize:12, color:'#888', display:'block', marginBottom:8 }}>Cours inscrits</label>
+        <label style={{ fontSize:12, color:'#888', display:'block', marginBottom:8 }}>Cours inscrits — {saisonActive}</label>
         {coursByJour.map(g => (
           <div key={g.jour} style={{ marginBottom:10 }}>
             <p style={{ fontSize:11, color:'#aaa', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6 }}>{g.jour}</p>
@@ -169,6 +119,8 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver, onSupprimerDefinitif
   const [stats, setStats] = useState(null)
   const [sessions, setSessions] = useState([])
   const [filtreSaison, setFiltreSaison] = useState(saisonInitiale || saisonActive)
+  const [showReglements, setShowReglements] = useState(false)
+  const [showVentilation, setShowVentilation] = useState(false)
 
   const saisonsDisponibles = useMemo(() => {
     const s1 = historique.map(h => h.saison)
@@ -269,7 +221,6 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver, onSupprimerDefinitif
             {membre.email && <span style={{ fontSize:13 }}>✉️ {membre.email}</span>}
           </div>
         )}
-        <AboInfo membreId={membre.id} />
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:10, paddingTop:10, borderTop:'0.5px solid rgba(0,0,0,0.08)' }}>
           <span style={{ fontSize:12, color:'#888' }}>Montant perçu {filtreSaison === 'Toutes' ? '(toutes saisons)' : `— ${filtreSaison}`}</span>
           <span style={{ fontSize:16, fontWeight:600, color:'#FF0099' }}>
@@ -281,14 +232,52 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver, onSupprimerDefinitif
             dont {chequesEnAttente.toLocaleString('fr-FR', { minimumFractionDigits:2, maximumFractionDigits:2 })} € de chèque(s) pas encore encaissé(s)
           </p>
         )}
-        {montantParSaison.length > 1 && (
-          <div style={{ marginTop:10, paddingTop:10, borderTop:'0.5px solid rgba(0,0,0,0.08)', display:'flex', flexDirection:'column', gap:3 }}>
-            {montantParSaison.map(([saison, montant]) => (
-              <div key={saison} style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'#888' }}>
-                <span>{saison}{saison===saisonActive ? ' (active)' : ''}</span>
-                <span>{montant.toLocaleString('fr-FR', { minimumFractionDigits:2, maximumFractionDigits:2 })} €</span>
+        {reglementsMembre.length > 0 && (
+          <div style={{ marginTop:8 }}>
+            <button onClick={()=>setShowReglements(v=>!v)}
+              style={{ background:'none', border:'none', padding:0, cursor:'pointer', fontSize:12, color:'#FF0099', fontWeight:500 }}>
+              {showReglements ? '▾' : '▸'} Détail des règlements ({reglementsMembre.length})
+            </button>
+            {showReglements && (
+              <div style={{ marginTop:6, display:'flex', flexDirection:'column', gap:4 }}>
+                {[...reglementsMembre]
+                  .sort((a,b)=>String(b.date_encaissement||'').localeCompare(String(a.date_encaissement||'')))
+                  .map((r,i)=>{
+                    const st = r.statut==='encaisse' ? {t:'encaissé',c:'#0f6e56'}
+                             : r.statut==='rejete'   ? {t:'rejeté',c:'#E24B4A'}
+                             : {t:'en attente',c:'#BA7517'}
+                    const d = r.date_encaissement
+                      ? new Date(String(r.date_encaissement).slice(0,10)+'T12:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'2-digit'})
+                      : '—'
+                    return (
+                      <div key={r.id||i} style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, background:'#f8f8f8', borderRadius:8, padding:'6px 10px' }}>
+                        <span style={{ color:'#888', minWidth:52 }}>{d}</span>
+                        <span style={{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.mode}{r.mode==='Chèque'&&r.banque?` · ${r.banque}`:''}</span>
+                        <span style={{ color:st.c, fontSize:11, whiteSpace:'nowrap' }}>{st.t}</span>
+                        <span style={{ fontWeight:600, minWidth:64, textAlign:'right' }}>{Number(r.montant||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})} €</span>
+                      </div>
+                    )
+                  })}
               </div>
-            ))}
+            )}
+          </div>
+        )}
+        {montantParSaison.length > 1 && (
+          <div style={{ marginTop:8 }}>
+            <button onClick={()=>setShowVentilation(v=>!v)}
+              style={{ background:'none', border:'none', padding:0, cursor:'pointer', fontSize:12, color:'#888', fontWeight:500 }}>
+              {showVentilation ? '▾' : '▸'} Montant par saison
+            </button>
+            {showVentilation && (
+              <div style={{ marginTop:6, display:'flex', flexDirection:'column', gap:3 }}>
+                {montantParSaison.map(([saison, montant]) => (
+                  <div key={saison} style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'#888' }}>
+                    <span>{saison}{saison===saisonActive ? ' (active)' : ''}</span>
+                    <span>{montant.toLocaleString('fr-FR', { minimumFractionDigits:2, maximumFractionDigits:2 })} €</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
