@@ -20,6 +20,7 @@ const BOTTOM_NAV = [
   { to: '/stages',    icon: '🏕️', label: 'Stages' },
   { to: '/membres',   icon: '👥', label: 'Membres' },
   { to: '/budget',    icon: '📊', label: 'Budget' },
+  { to: '/resultats', icon: '🧮', label: 'Résultats' },
 ]
 
 export default function Layout({ children }) {
