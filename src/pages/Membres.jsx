@@ -690,7 +690,10 @@ export default function Membres() {
           style={{ ...INPUT, flex:1, minWidth:160, margin:0 }}>
           <option value="tous">Tous les cours</option>
           <option value="sans">Sans cours</option>
-          {coursDeLaSaison.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
+          {coursDeLaSaison.map(c => {
+            const jh = [c.jour!=null?JOURS_FULL[c.jour]:null, c.heure].filter(Boolean).join(' ')
+            return <option key={c.id} value={c.id}>{c.nom}{jh?` — ${jh}`:''}</option>
+          })}
         </select>
       </div>
 
