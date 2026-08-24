@@ -21,10 +21,22 @@ function coursNomsDeMembre(membreId, cours, inscriptions) {
 }
 
 // Même chose, mais restreint à une saison donnée (pour la liste filtrable par saison).
+// Quand le membre suit plusieurs cours du MÊME nom (ex. deux « Body Training » sur des
+// créneaux différents), on précise le jour + l'heure pour les distinguer ; sinon on
+// garde le nom seul pour ne pas surcharger.
+const JOURS_ABR = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam']
 function coursNomsDeMembreSaison(membreId, saison, cours, inscriptions) {
-  return cours
-    .filter(c => inscriptions.some(i => i.membre_id === membreId && i.cours_id === c.id && i.saison === saison))
-    .map(c => c.nom)
+  const suivis = cours.filter(c => inscriptions.some(i => i.membre_id === membreId && i.cours_id === c.id && i.saison === saison))
+  const compteNoms = {}
+  for (const c of suivis) compteNoms[c.nom] = (compteNoms[c.nom] || 0) + 1
+  return suivis
+    .map(c => {
+      if (compteNoms[c.nom] > 1) {
+        const jh = [c.jour != null ? JOURS_ABR[c.jour] : null, c.heure].filter(Boolean).join(' ')
+        return jh ? `${c.nom} (${jh})` : c.nom
+      }
+      return c.nom
+    })
     .join(' · ')
 }
 
@@ -149,7 +161,7 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver, onSupprimerDefinitif
 
   useEffect(() => {
     const historiqueFiltre = filtreSaison === 'Toutes' ? historique : historique.filter(h => h.saison === filtreSaison)
-    const courIds = inscriptions.filter(i=>i.membre_id===membre.id).map(i=>i.cours_id)
+    const courIds = inscriptions.filter(i=>i.membre_id===membre.id && (filtreSaison==='Toutes' || i.saison===filtreSaison)).map(i=>i.cours_id)
     const toutesLesSessions = []
     let totalSuivis=0, totalManques=0, totalRattrapages=0, derniereDate=null
 
@@ -198,7 +210,7 @@ function FicheMembre({ membre, onClose, onEdit, onArchiver, onSupprimerDefinitif
               <span style={{ marginLeft:8, fontSize:11, fontWeight:500, color:'#888', background:'#eee', borderRadius:12, padding:'2px 8px', verticalAlign:'middle' }}>Archivé</span>
             )}
           </h2>
-          <p style={{ fontSize:13, color:'#888', margin:0 }}>{coursNomsDeMembre(membre.id, cours, inscriptions) || 'Pas de cours'}</p>
+          <p style={{ fontSize:13, color:'#888', margin:0 }}>{(filtreSaison==='Toutes' ? coursNomsDeMembre(membre.id, cours, inscriptions) : coursNomsDeMembreSaison(membre.id, filtreSaison, cours, inscriptions)) || 'Pas de cours'}</p>
         </div>
         <div style={{ display:'flex', gap:6 }}>
           <button onClick={onEdit} style={{ ...BTN.ghost, fontSize:12, padding:'6px 12px' }}>Modifier</button>
